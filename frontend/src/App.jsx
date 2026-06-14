@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circle, CheckCircle2, User, Lock, Unlock, Tag, MessageSquare, Filter, Send, Settings, Calendar, RefreshCw, LogOut, Users, Trash2, KeyRound, ChevronDown } from 'lucide-react';
+import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circle, CheckCircle2, User, Lock, Unlock, Tag, MessageSquare, Filter, Send, Settings, Calendar, RefreshCw, LogOut, Users, Trash2, KeyRound, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
-const API = 'http://localhost:8095';
+const API = 'http://localhost:8000';
 
 // Auth wrapper
 const authFetch = (url, options = {}) => {
@@ -21,8 +21,9 @@ const authFetch = (url, options = {}) => {
   });
 };
 
-const PRIORIDADES_BADGE = { 'Baixa': 'bg-green-600 text-white shadow-sm', 'Normal': 'bg-gray-500 text-white shadow-sm', 'Alta': 'bg-orange-500 text-white shadow-sm', 'Urgente': 'bg-red-600 text-white font-black shadow-sm' };
-const PRIORIDADE_CARD_STYLE = { 'Baixa': 'bg-green-100 border-green-500 border-2', 'Normal': 'bg-gray-50 border-gray-300 border-2 hover:border-emerald-400', 'Alta': 'bg-orange-100 border-orange-500 border-2', 'Urgente': 'bg-red-200 border-red-600 border-2 shadow-md shadow-red-300/50' };
+const PRIORIDADES_BADGE = { 'Baixa': 'bg-green-600 text-white shadow-sm', 'Normal': 'bg-yellow-400 text-gray-900 shadow-sm', 'Alta': 'bg-orange-500 text-white shadow-sm', 'Urgente': 'bg-red-600 text-white font-black shadow-sm' };
+const PRIORIDADE_CARD_STYLE = { 'Baixa': 'bg-green-100 border-green-500 border-2', 'Normal': 'bg-yellow-50 border-yellow-400 border-2', 'Alta': 'bg-orange-100 border-orange-500 border-2', 'Urgente': 'bg-red-200 border-red-600 border-2 shadow-md shadow-red-300/50' };
+const PRIORIDADE_ORDEM = { 'Urgente': 4, 'Alta': 3, 'Normal': 2, 'Baixa': 1 };
 
 function formatarData(dataISO) {
   if (!dataISO) return ''; const [ano, mes, dia] = dataISO.split('-'); return `${dia}/${mes}/${ano}`;
@@ -195,7 +196,7 @@ function AdminPanel({ onBack, currentUsers, refreshUsers }) {
                 <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nível de Acesso</label>
                 <select value={novoRole} onChange={e => setNovoRole(e.target.value)} className="w-full p-2 border rounded-lg outline-none focus:border-emerald-500">
                   <option value="user">Usuário Padrão</option>
-                  <option value="admin">Administrador (Admin)</option>
+                  <option value="admin">Admin</option>
                 </select>
               </div>
               <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg transition-colors">Criar Usuário</button>
@@ -209,9 +210,9 @@ function AdminPanel({ onBack, currentUsers, refreshUsers }) {
                 <div key={u.id} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-xl shadow-sm">
                   <div>
                     <p className="font-bold text-gray-800">{u.nome}</p>
-                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${u.role === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>{u.role}</span>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${u.role === 'superadmin' ? 'bg-purple-100 text-purple-700' : u.role === 'admin' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}`}>{u.role === 'superadmin' ? 'Super Admin' : u.role === 'admin' ? 'Admin' : 'Usuário'}</span>
                   </div>
-                  {u.nome !== 'admin' && (
+                  {u.role !== 'superadmin' && (
                     <button onClick={() => deletarUsuario(u.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={18}/></button>
                   )}
                 </div>
@@ -234,7 +235,7 @@ function ListActionsMenu({ col, user, onClose, onAddCard, onArchiveList, onUpdat
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
-  if (user.role !== 'admin') return null;
+  if (user.role !== 'admin' && user.role !== 'superadmin') return null;
 
   return (
     <div ref={menuRef} className="absolute top-12 right-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-[100] p-3 space-y-1 animate-in fade-in zoom-in-95">
@@ -270,8 +271,18 @@ function ListActionsMenu({ col, user, onClose, onAddCard, onArchiveList, onUpdat
 
       <div className="pt-3 mt-2 border-t border-gray-200 space-y-2">
         <div className="flex items-center gap-2 text-sm text-gray-700 font-medium"><Palette size={16} className="text-gray-500"/> Cor da Lista</div>
-        <div className="grid grid-cols-5 gap-2 pt-1">
-          {['#ebecf0', '#fecaca', '#fef08a', '#bbf7d0', '#bfdbfe', '#e9d5ff', '#fed7aa', '#fbcfe8'].map(color => (
+        <div className="grid grid-cols-6 gap-2 pt-1">
+          {[
+            '#ebecf0', '#94a3b8',
+            '#fecaca', '#f87171',
+            '#fed7aa', '#fb923c',
+            '#fef08a', '#fde047',
+            '#bbf7d0', '#4ade80',
+            '#99f6e4', '#2dd4bf',
+            '#bfdbfe', '#60a5fa',
+            '#e9d5ff', '#c084fc',
+            '#fbcfe8', '#f472b6',
+          ].map(color => (
             <button key={color} onClick={() => onUpdateCol({ ...col, cor: color })} className="w-full h-6 rounded border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: color }} />
           ))}
         </div>
@@ -290,8 +301,14 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
   const [novaSubtarefa, setNovaSubtarefa] = useState('');
   const [novoComentario, setNovoComentario] = useState('');
   const [prioridadeAberto, setPrioridadeAberto] = useState(false);
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editingItemText, setEditingItemText] = useState('');
+  const [expandedItemId, setExpandedItemId] = useState(null);
+  const [editingSubItemId, setEditingSubItemId] = useState(null);
+  const [editingSubItemText, setEditingSubItemText] = useState('');
+  const [novaSubetapa, setNovaSubetapa] = useState('');
 
-  const isAdmin = user.role === 'admin';
+  const isAdmin = user.role === 'admin' || user.role === 'superadmin';
   const isAuthor = card?.autor === user.nome;
   
   const podeEditarDescricao = isAdmin || (col?.publica && (isAuthor || !card?.id));
@@ -315,7 +332,12 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
   const addSubtarefa = () => { if (!novaSubtarefa.trim() || !isAdmin) return; setChecklist([...checklist, { id: `sub-${Date.now()}`, texto: novaSubtarefa, concluido: false }]); setNovaSubtarefa(''); };
   const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: `msg-${Date.now()}`, autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
 
-  const percentual = checklist.length > 0 ? Math.round((checklist.filter(c => c.concluido).length / checklist.length) * 100) : 0;
+  const percentual = checklist.length > 0 ? Math.round(
+    checklist.reduce((acc, item) => {
+      const subs = item.subetapas || [];
+      return acc + (subs.length === 0 ? (item.concluido ? 1 : 0) : subs.filter(s => s.concluido).length / subs.length);
+    }, 0) / checklist.length * 100
+  ) : 0;
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-2 md:p-4 backdrop-blur-sm">
@@ -386,15 +408,79 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                   {checklist.length > 0 && <span className="text-sm font-bold text-gray-500">{percentual}%</span>}
                 </div>
                 {checklist.length > 0 && (<div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full transition-all duration-300 ${percentual === 100 ? 'bg-emerald-500' : 'bg-teal-500'}`} style={{ width: `${percentual}%` }} /></div>)}
-                <div className="space-y-2">
-                  {checklist.map(item => (
-                    <div key={item.id} className="flex items-center gap-3">
-                      <button disabled={!isAdmin} onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, concluido: !i.concluido} : i))} className={`${!isAdmin ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}>
-                        {item.concluido ? <CheckCircle2 size={18} className="text-emerald-500"/> : <Circle size={18} className="text-gray-300"/>}
-                      </button>
-                      <span className={`text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{item.texto}</span>
-                    </div>
-                  ))}
+                <div className="space-y-1">
+                  {checklist.map(item => {
+                    const subetapas = item.subetapas || [];
+                    const isExpanded = expandedItemId === item.id;
+                    return (
+                      <div key={item.id} className="mb-1">
+                        {/* Linha principal da etapa */}
+                        <div className="flex items-center gap-2 group/item">
+                          <button
+                            disabled={!isAdmin}
+                            onClick={() => {
+                              const nowDone = !item.concluido;
+                              setChecklist(checklist.map(i => i.id === item.id ? {
+                                ...i,
+                                concluido: nowDone,
+                                subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true})) : (i.subetapas||[])
+                              } : i));
+                            }}
+                            className={`${!isAdmin ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}
+                          >
+                            {item.concluido ? <CheckCircle2 size={18} className="text-emerald-500"/> : <Circle size={18} className="text-gray-300"/>}
+                          </button>
+                          {isAdmin && editingItemId === item.id ? (
+                            <input value={editingItemText} onChange={e => setEditingItemText(e.target.value)} onBlur={() => { if (editingItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, texto: editingItemText.trim()} : i)); setEditingItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingItemId(null); }} className="flex-1 text-sm border-b-2 border-emerald-400 outline-none bg-transparent text-gray-700 py-0.5" autoFocus />
+                          ) : (
+                            <span className={`flex-1 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
+                          )}
+                          {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={14}/></button>}
+                          <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
+                            {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                          </button>
+                        </div>
+
+                        {/* Descrição — só aparece quando expandido */}
+                        {isExpanded && (
+                          <div className="ml-7 mt-1 mb-2 pl-3 border-l-2 border-emerald-300 space-y-2">
+                            <textarea
+                              value={item.notas || ''}
+                              onChange={e => setChecklist(checklist.map(i => i.id === item.id ? {...i, notas: e.target.value} : i))}
+                              disabled={!isAdmin}
+                              placeholder={isAdmin ? 'Observações, anotações ou descrição desta etapa...' : 'Sem observações.'}
+                              className="w-full h-20 p-2 bg-gray-50 rounded-lg border border-gray-200 outline-none focus:bg-white text-sm resize-none"
+                            />
+                            {isAdmin && (
+                              <div className="flex gap-2">
+                                <input value={novaSubetapa} onChange={e => setNovaSubetapa(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novaSubetapa.trim()) { setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false}]} : i)); setNovaSubetapa(''); } }} className="flex-1 p-1.5 border rounded text-xs outline-none focus:border-emerald-400" placeholder="Adicionar sub-etapa..." />
+                                <button onClick={() => { if (!novaSubetapa.trim()) return; setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false}]} : i)); setNovaSubetapa(''); }} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold">Add</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Sub-etapas — sempre visíveis, indentadas */}
+                        {subetapas.length > 0 && (
+                          <div className="ml-7 pl-3 mt-1 border-l-2 border-gray-200 space-y-1">
+                            {subetapas.map(sub => (
+                              <div key={sub.id} className="flex items-center gap-2 group/sub">
+                                <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido} : s)} : i))} className="shrink-0 cursor-pointer hover:scale-110 transition-transform">
+                                  {sub.concluido ? <CheckCircle2 size={15} className="text-emerald-500"/> : <Circle size={15} className="text-gray-300"/>}
+                                </button>
+                                {isAdmin && editingSubItemId === sub.id ? (
+                                  <input value={editingSubItemText} onChange={e => setEditingSubItemText(e.target.value)} onBlur={() => { if (editingSubItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, texto: editingSubItemText.trim()} : s)} : i)); setEditingSubItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingSubItemId(null); }} className="flex-1 text-xs border-b border-emerald-400 outline-none bg-transparent py-0.5" autoFocus />
+                                ) : (
+                                  <span className={`flex-1 text-xs ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
+                                )}
+                                {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={12}/></button>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
                 {isAdmin && (
                   <div className="flex flex-row items-center gap-2 pt-2 w-full">
@@ -412,7 +498,7 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
             <div className="space-y-3">
               {comentarios.map(msg => {
                 const autorNoBanco = allUsers.find(u => u.nome === msg.autor);
-                const isAdminComment = autorNoBanco?.role === 'admin';
+                const isAdminComment = autorNoBanco?.role === 'admin' || autorNoBanco?.role === 'superadmin';
                 const isAuthorComment = msg.autor === (card?.autor || user.nome);
                 let boxClass = "bg-gray-50 border-gray-100"; let badge = null;
                 if (isAdminComment) { boxClass = "bg-orange-50 border-orange-100"; badge = <span className="ml-2 text-[9px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>; } 
@@ -453,11 +539,29 @@ export default function App() {
   
   const [filtroAtivo, setFiltroAtivo] = useState('todas');
   const [filtroAberto, setFiltroAberto] = useState(false);
+  const [ordenacao, setOrdenacao] = useState('prioridade_desc');
   const [cols, setCols] = useState([]);
   const [cards, setCards] = useState({});
   const [modal, setModal] = useState(null);
   const [activeMenu, setActiveMenu] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [headerVisible, setHeaderVisible] = useState(false);
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(false);
+  const boardRef = useRef(null);
+
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const handler = (e) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('demandaflow_user');
@@ -532,10 +636,14 @@ export default function App() {
 
   const handleSaveCard = (d) => {
     let finalStatus = modal.status; let finalPriority = d.prioridade; 
-    const total = d.checklist?.length || 0; const concluidas = d.checklist?.filter(c => c.concluido).length || 0;
-    if (total > 0) {
-      if (concluidas === total) { const colDestino = cols.find(c => c.auto_concluido); if (colDestino) finalStatus = colDestino.id; } 
-      else if (concluidas > 0) { const colDestino = cols.find(c => c.auto_andamento); const colAtual = cols.find(c => c.id === finalStatus); if (colDestino && !colAtual?.auto_concluido && !colAtual?.auto_andamento) { finalStatus = colDestino.id; } }
+    const cl = d.checklist || [];
+    const pct = cl.length > 0 ? Math.round(cl.reduce((acc, item) => {
+      const subs = item.subetapas || [];
+      return acc + (subs.length === 0 ? (item.concluido ? 1 : 0) : subs.filter(s => s.concluido).length / subs.length);
+    }, 0) / cl.length * 100) : 0;
+    if (cl.length > 0) {
+      if (pct === 100) { const colDestino = cols.find(c => c.auto_concluido); if (colDestino) finalStatus = colDestino.id; } 
+      else if (pct > 0) { const colDestino = cols.find(c => c.auto_andamento); const colAtual = cols.find(c => c.id === finalStatus); if (colDestino && !colAtual?.auto_concluido && !colAtual?.auto_andamento) { finalStatus = colDestino.id; } }
     }
     const targetCol = cols.find(c => c.id === finalStatus);
     if (targetCol && targetCol.auto_concluido) { finalPriority = 'Baixa'; }
@@ -546,7 +654,7 @@ export default function App() {
 
   const onDragEnd = (result) => {
     const { destination, source, draggableId, type } = result;
-    if (!destination || user.role !== 'admin') return;
+    if (!destination || (user.role !== 'admin' && user.role !== 'superadmin')) return;
 
     if (type === 'column') {
       const newCols = Array.from(cols); const [removed] = newCols.splice(source.index, 1); newCols.splice(destination.index, 0, removed);
@@ -565,12 +673,20 @@ export default function App() {
   if (currentScreen === 'admin') return <AdminPanel onBack={() => setCurrentScreen('board')} currentUsers={allUsers} refreshUsers={fetchUsers} />;
 
   return (
-    <div className="relative min-h-[100dvh] p-3 md:p-8 font-sans flex flex-col overflow-hidden">
+    <div className="relative h-[100dvh] font-sans overflow-hidden" onMouseMove={e => { setShowLeftArrow(e.clientX < 80); setShowRightArrow(e.clientX > window.innerWidth - 80); }}>
       <div className="fixed inset-0 bg-gradient-to-br from-emerald-800 via-teal-900 to-emerald-900 -z-10" />
 
       {modal && <CardModal card={modal.card} col={cols.find(c => c.id === modal.status)} user={user} allUsers={allUsers} onClose={() => setModal(null)} onSave={handleSaveCard} onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(() => { setModal(null); sync(); })} />}
 
-      <header className="mb-4 flex flex-col sm:flex-row justify-between items-center gap-3 bg-white/10 p-3 md:p-4 rounded-2xl backdrop-blur-md shrink-0 relative z-[110]">
+      <div
+        className="fixed top-0 left-0 right-0 h-4 z-[120]"
+        onMouseEnter={() => setHeaderVisible(true)}
+      />
+      <header
+        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-white/10 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${headerVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        onMouseEnter={() => setHeaderVisible(true)}
+        onMouseLeave={() => setHeaderVisible(false)}
+      >
         <div className="w-full flex justify-between items-center sm:w-auto">
           <h1 className="text-2xl md:text-3xl font-black text-white italic tracking-tighter uppercase">Kyndo</h1>
           <button onClick={sync} className="sm:hidden flex items-center justify-center p-2 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 shadow-lg">
@@ -589,6 +705,7 @@ export default function App() {
                 <Filter size={16} className="text-emerald-600 shrink-0" />
                 <span className="font-bold text-xs md:text-sm truncate">
                   {filtroAtivo === 'todas' ? 'Todas Demandas' : filtroAtivo === 'minhas' ? 'Minhas Demandas' : `Prio: ${filtroAtivo}`}
+                  {ordenacao !== 'prioridade_desc' && <span className="ml-1 text-emerald-600">{ordenacao === 'prioridade_asc' ? '↑' : '–'}</span>}
                 </span>
               </div>
               <ChevronDown size={14} className="text-gray-500 shrink-0" />
@@ -598,13 +715,21 @@ export default function App() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setFiltroAberto(false)} />
                 <div className="absolute top-full mt-2 right-0 sm:right-auto w-full min-w-[180px] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
-                  {[{ val: 'todas', label: 'Todas as Demandas' }, { val: 'minhas', label: 'Minhas Demandas' }, { divider: true }, { val: 'Baixa', label: 'Prioridade: Baixa' }, { val: 'Normal', label: 'Prioridade: Normal' }, { val: 'Alta', label: 'Prioridade: Alta' }, { val: 'Urgente', label: 'Prioridade: Urgente' }].map((opcao, i) => 
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Filtrar</div>
+                  {[{ val: 'todas', label: 'Todas as Demandas' }, { val: 'minhas', label: 'Minhas Demandas' }, { divider: true }, { val: 'Baixa', label: 'Prioridade: Baixa' }, { val: 'Normal', label: 'Prioridade: Normal' }, { val: 'Alta', label: 'Prioridade: Alta' }, { val: 'Urgente', label: 'Prioridade: Urgente' }].map((opcao, i) =>
                     opcao.divider ? (<div key={`div-${i}`} className="h-px bg-gray-100 my-1 mx-2" />) : (
                       <div key={opcao.val} onClick={() => { setFiltroAtivo(opcao.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-50 cursor-pointer text-xs md:text-sm font-bold transition-colors ${filtroAtivo === opcao.val ? 'text-emerald-600 bg-emerald-50/50' : 'text-gray-700'}`}>
                         {opcao.label}
                       </div>
                     )
                   )}
+                  <div className="h-px bg-gray-100 my-1 mx-2" />
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Ordenação</div>
+                  {[{ val: 'prioridade_desc', label: '↓ Maior prioridade primeiro' }, { val: 'prioridade_asc', label: '↑ Menor prioridade primeiro' }, { val: 'padrao', label: '– Sem ordenação' }].map(opcao => (
+                    <div key={opcao.val} onClick={() => { setOrdenacao(opcao.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-50 cursor-pointer text-xs md:text-sm font-bold transition-colors ${ordenacao === opcao.val ? 'text-emerald-600 bg-emerald-50/50' : 'text-gray-700'}`}>
+                      {opcao.label}
+                    </div>
+                  ))}
                 </div>
               </>
             )}
@@ -616,7 +741,7 @@ export default function App() {
               <span className="font-bold text-xs md:text-sm truncate max-w-[80px] md:max-w-none">{user.nome}</span>
             </div>
             
-            {user.role === 'admin' && (
+            {user.role === 'superadmin' && (
               <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }} className="text-[10px] md:text-xs bg-orange-500 hover:bg-orange-600 px-2 md:px-3 py-1 rounded font-bold uppercase transition-colors shadow-md">
                 Admin
               </button>
@@ -629,26 +754,41 @@ export default function App() {
         </div>
       </header>
 
-      <div className="overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden flex-grow pb-10 md:pb-4 custom-scrollbar">
+      <button
+        onClick={() => boardRef.current && (boardRef.current.scrollLeft -= 320)}
+        className={`fixed left-2 top-1/2 -translate-y-1/2 z-[100] w-10 h-16 bg-black/40 text-white rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm pointer-events-auto ${showLeftArrow ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        aria-label="Rolar esquerda"
+      >
+        <ChevronLeft size={28} />
+      </button>
+      <button
+        onClick={() => boardRef.current && (boardRef.current.scrollLeft += 320)}
+        className={`fixed right-2 top-1/2 -translate-y-1/2 z-[100] w-10 h-16 bg-black/40 text-white rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm ${showRightArrow ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        aria-label="Rolar direita"
+      >
+        <ChevronRight size={28} />
+      </button>
+      <div ref={boardRef} className="h-full overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden p-3 md:p-8 custom-scrollbar">
         <DragDropContext onDragEnd={onDragEnd}>
-          <Droppable droppableId="board" direction="horizontal" type="column">
+          <div className="relative min-h-full w-full">
+            <Droppable droppableId="board" direction="horizontal" type="column">
             {(provided) => (
-              <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 md:gap-4 items-center md:items-start h-full w-full md:w-max px-1 md:px-2">
+              <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 items-start w-full">
                 
                 {cols.map((col, index) => (
-                  <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={user.role !== 'admin'}>
+                  <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={user.role !== 'admin' && user.role !== 'superadmin'}>
                     {(p, snapshot) => (
-                      <div ref={p.innerRef} {...p.draggableProps} className={`w-full md:w-[calc((100vw-9rem)/5)] shrink-0 flex flex-col rounded-2xl shadow-xl h-fit min-h-[120px] md:h-full max-h-[75vh] md:max-h-[calc(100dvh-8rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`} style={{ ...p.draggableProps.style, backgroundColor: col.cor }}>
+                      <div ref={p.innerRef} {...p.draggableProps} className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl min-h-[120px] max-h-[calc(100dvh-4rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`} style={{ ...p.draggableProps.style, backgroundColor: col.cor }}>
                         
                         <div {...p.dragHandleProps} className="p-3 pl-4 flex items-center justify-between gap-2 relative shrink-0">
                           <div className="flex items-center gap-2">
                             {col.publica ? <Unlock size={12} className="text-green-600"/> : <Lock size={12} className="text-gray-500"/>}
-                            <input disabled={user.role !== 'admin'} value={col.titulo} onChange={e => {
+                            <input disabled={user.role !== 'admin' && user.role !== 'superadmin'} value={col.titulo} onChange={e => {
                                 const newCol = {...col, titulo: e.target.value};
                                 authFetch(`${API}/columns/${col.id}`, { method: 'PUT', body: JSON.stringify(newCol) }).then(sync);
-                            }} className="bg-transparent font-bold text-gray-800 text-[11px] w-full outline-none uppercase tracking-widest" />
+                            }} className="bg-transparent font-bold text-gray-800 text-sm w-full outline-none uppercase tracking-widest" />
                           </div>
-                          {user.role === 'admin' && <button onClick={() => setActiveMenu(activeMenu === col.id ? null : col.id)} className="p-1 hover:bg-black/5 rounded transition-colors"><MoreHorizontal size={18}/></button>}
+                          {(user.role === 'admin' || user.role === 'superadmin') && <button onClick={() => setActiveMenu(activeMenu === col.id ? null : col.id)} className="p-1 hover:bg-black/5 rounded transition-colors"><MoreHorizontal size={18}/></button>}
                           {activeMenu === col.id && <ListActionsMenu col={col} user={user} onClose={() => setActiveMenu(null)} onAddCard={() => setModal({status: col.id})} onArchiveList={() => {authFetch(`${API}/columns/${col.id}`, { method: 'PUT', body: JSON.stringify({...col, arquivado: true}) }).then(sync);}} onUpdateCol={(data) => {authFetch(`${API}/columns/${col.id}`, { method: 'PUT', body: JSON.stringify(data) }).then(sync);}} />}
                         </div>
 
@@ -662,11 +802,22 @@ export default function App() {
                                   if (['Baixa', 'Normal', 'Alta', 'Urgente'].includes(filtroAtivo)) return k.prioridade === filtroAtivo;
                                   return true;
                                 })
+                                .sort((a, b) => {
+                                  if (ordenacao === 'prioridade_desc') return (PRIORIDADE_ORDEM[b.prioridade] || 0) - (PRIORIDADE_ORDEM[a.prioridade] || 0);
+                                  if (ordenacao === 'prioridade_asc') return (PRIORIDADE_ORDEM[a.prioridade] || 0) - (PRIORIDADE_ORDEM[b.prioridade] || 0);
+                                  return 0;
+                                })
                                 .map((card, ki) => {
-                                const totalEtapas = card.checklist?.length || 0;
-                                const concluidas = card.checklist?.filter(c => c.concluido).length || 0;
-                                const progresso = totalEtapas > 0 ? Math.round((concluidas / totalEtapas) * 100) : 0;
-                                const isAdmin = user.role === 'admin';
+                                const clCard = card.checklist || [];
+                                const totalEtapas = clCard.length;
+                                const progresso = totalEtapas > 0 ? Math.round(
+                                  clCard.reduce((acc, item) => {
+                                    const subs = item.subetapas || [];
+                                    return acc + (subs.length === 0 ? (item.concluido ? 1 : 0) : subs.filter(s => s.concluido).length / subs.length);
+                                  }, 0) / totalEtapas * 100
+                                ) : 0;
+                                const concluidas = clCard.filter(i => i.concluido).length;
+                                const isAdmin = user.role === 'admin' || user.role === 'superadmin';
                                 const qtdComentarios = card.comentarios?.length || 0;
 
                                 const stylePrioridade = PRIORIDADE_CARD_STYLE[card.prioridade || 'Normal'];
@@ -674,38 +825,38 @@ export default function App() {
                                 return (
                                   <Draggable key={card.id} draggableId={card.id} index={ki} isDragDisabled={!isAdmin}>
                                     {(kp) => (
-                                      <div ref={kp.innerRef} {...kp.draggableProps} {...kp.dragHandleProps} onClick={() => setModal({card, status: col.id})} className={`p-3 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}>
+                                      <div ref={kp.innerRef} {...kp.draggableProps} {...kp.dragHandleProps} onClick={() => setModal({card, status: col.id})} className={`p-4 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}>
                                         
                                         <div className="flex justify-between items-start">
-                                          <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
+                                          <span className={`text-xs uppercase px-2 py-0.5 rounded ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
                                             {card.prioridade || 'Normal'}
                                           </span>
                                           {card.prazo && (
-                                            <span className="flex items-center gap-1 text-[10px] text-orange-700 bg-orange-100 font-bold px-1.5 py-0.5 rounded">
-                                              <Calendar size={10} /> {formatarData(card.prazo)}
+                                            <span className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 font-bold px-1.5 py-0.5 rounded">
+                                              <Calendar size={12} /> {formatarData(card.prazo)}
                                             </span>
                                           )}
                                         </div>
 
-                                        <p className="text-sm font-bold text-gray-800 leading-tight">{card.titulo}</p>
+                                        <p className="text-base font-bold text-gray-800 leading-tight">{card.titulo}</p>
                                         
                                         {totalEtapas > 0 && concluidas > 0 && (
                                           <div>
                                             <div className="flex justify-between items-center mb-1">
-                                              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Progresso</span>
-                                              <span className="text-[10px] font-bold text-gray-700">{progresso}%</span>
+                                              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Progresso</span>
+                                              <span className="text-xl font-black text-gray-800">{progresso}%</span>
                                             </div>
-                                            <div className="w-full h-1.5 bg-gray-300/50 rounded-full overflow-hidden">
+                                            <div className="w-full h-2 bg-gray-300/50 rounded-full overflow-hidden">
                                               <div className={`h-full transition-all duration-300 ${progresso === 100 ? 'bg-emerald-600' : 'bg-teal-500'}`} style={{ width: `${progresso}%` }} />
                                             </div>
                                           </div>
                                         )}
 
                                         <div className="flex justify-between items-center mt-1 border-t pt-2 border-black/10">
-                                          <p className="text-[9px] text-gray-600 uppercase font-bold tracking-tighter">De: {card.autor}</p>
+                                          <p className="text-xs text-gray-600 uppercase font-bold">De: {card.autor}</p>
                                           {qtdComentarios > 0 && (
-                                            <div className="flex items-center gap-1 text-[10px] text-gray-600 font-bold bg-white/60 px-1.5 rounded">
-                                              <MessageSquare size={10} /> {qtdComentarios}
+                                            <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-white/60 px-1.5 rounded">
+                                              <MessageSquare size={12} /> {qtdComentarios}
                                             </div>
                                           )}
                                         </div>
@@ -719,7 +870,7 @@ export default function App() {
                           )}
                         </Droppable>
 
-                        {(user.role === 'admin' || col.publica) && (
+                        {(user.role === 'admin' || user.role === 'superadmin' || col.publica) && (
                           <button onClick={() => setModal({status: col.id})} className="m-2 mt-auto shrink-0 p-2 text-xs font-bold text-gray-500 hover:bg-black/5 rounded-xl flex items-center gap-2 transition-colors">
                             <Plus size={16}/> Sugerir demanda
                           </button>
@@ -731,16 +882,17 @@ export default function App() {
                 
                 {provided.placeholder}
 
-                {user.role === 'admin' && (
-                  <button onClick={() => { authFetch(`${API}/columns`, {method: 'POST', body: JSON.stringify({id: `col-${Date.now()}`, titulo: 'Nova Coluna', cor: '#ebecf0', ordem: cols.length, publica: false, auto_andamento: false, auto_concluido: false})}).then(sync); }} className="w-full md:w-[calc((100vw-9rem)/5)] shrink-0 h-16 bg-white/10 hover:bg-white/20 border-2 border-white/30 border-dashed rounded-2xl flex items-center justify-center text-white transition-all cursor-pointer">
-                    <Plus size={20} className="mr-2" />
-                    <span className="font-bold text-sm">Adicionar Coluna</span>
-                  </button>
-                )}
-
               </div>
             )}
-          </Droppable>
+            </Droppable>
+
+            {(user.role === 'admin' || user.role === 'superadmin') && (
+              <button onClick={() => { authFetch(`${API}/columns`, {method: 'POST', body: JSON.stringify({id: `col-${Date.now()}`, titulo: 'Nova Coluna', cor: '#ebecf0', ordem: cols.length, publica: false, auto_andamento: false, auto_concluido: false})}).then(sync); }} className="hidden md:flex absolute top-0 w-64 h-16 bg-white/10 hover:bg-white/20 border-2 border-white/30 border-dashed rounded-2xl items-center justify-center text-white transition-all cursor-pointer" style={{ left: 'calc(100% + 3rem)' }}>
+                <Plus size={20} className="mr-2" />
+                <span className="font-bold text-sm">Adicionar Coluna</span>
+              </button>
+            )}
+          </div>
         </DragDropContext>
       </div>
     </div>

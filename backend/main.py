@@ -103,9 +103,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 # DB Initialization
 def init_db():
     db = SessionLocal()
-    if not db.query(UserDB).filter(UserDB.nome == "admin").first():
+    admin = db.query(UserDB).filter(UserDB.nome == "admin").first()
+    if not admin:
         hashed_pw = get_password_hash("admin")
-        db.add(UserDB(id=str(uuid.uuid4()), nome="admin", senha=hashed_pw, role="admin", senha_temporaria=False))
+        db.add(UserDB(id=str(uuid.uuid4()), nome="admin", senha=hashed_pw, role="superadmin", senha_temporaria=False))
+    elif admin.role == "admin":
+        admin.role = "superadmin"
     
     if db.query(ColumnDB).count() == 0:
         cols = [
