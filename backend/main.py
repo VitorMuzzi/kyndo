@@ -6,12 +6,17 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy import create_engine, Column, String, Boolean, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 import uuid
 import jwt
 import bcrypt
+import os
+
+load_dotenv()
 
 # Security config
-SECRET_KEY = "coloque_sua_chave_secreta_aqui"
+SECRET_KEY = os.getenv("SECRET_KEY", "coloque_sua_chave_secreta_aqui")
+SUPERADMIN_PASSWORD = os.getenv("SUPERADMIN_PASSWORD", "admin")
 ALGORITHM = "HS256"
 
 security = HTTPBearer()
@@ -113,9 +118,10 @@ def init_db():
     db = SessionLocal()
     admin = db.query(UserDB).filter(UserDB.nome == "admin").first()
     if not admin:
-        hashed_pw = get_password_hash("admin")
+        hashed_pw = get_password_hash(SUPERADMIN_PASSWORD)
         db.add(UserDB(id=str(uuid.uuid4()), nome="admin", senha=hashed_pw, role="superadmin", senha_temporaria=False))
-    elif admin.role == "admin":
+    else:
+        admin.senha = get_password_hash(SUPERADMIN_PASSWORD)
         admin.role = "superadmin"
     
     if db.query(ColumnDB).count() == 0:

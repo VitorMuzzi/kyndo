@@ -308,6 +308,18 @@ function ListActionsMenu({ col, user, onClose, onAddCard, onArchiveList, onUpdat
   );
 }
 
+function renderTextWithLinks(text) {
+  if (!text) return null;
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map((part, i) =>
+    /^https?:\/\/[^\s]+$/.test(part) ? (
+      <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800 break-all" onClick={e => e.stopPropagation()}>{part}</a>
+    ) : (
+      <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>
+    )
+  );
+}
+
 function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
   const [desc, setDesc] = useState(card?.descricao || '');
@@ -398,16 +410,16 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
 
             <div className="flex flex-wrap items-center gap-2 md:gap-4 text-[10px] md:text-xs font-bold uppercase tracking-widest mt-1">
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">Responsável:</span>
+                <span className="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">{col?.id === 'col-1' ? 'Solicitante:' : 'Responsável:'}</span>
                 {responsaveis.map(nome => (
                   <span key={nome} className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>
                     {nome}
-                    {isSuperAdmin && responsaveis.length > 1 && (
+                    {isAdmin && responsaveis.length > 1 && (
                       <button onClick={e => { e.stopPropagation(); setResponsaveis(responsaveis.filter(r => r !== nome)); }} className="hover:text-red-600 leading-none">×</button>
                     )}
                   </span>
                 ))}
-                {isSuperAdmin && (
+                {isAdmin && (
                   <select value="" onChange={e => { if (e.target.value && !responsaveis.includes(e.target.value)) setResponsaveis([...responsaveis, e.target.value]); }} className="text-[10px] font-bold border border-dashed border-gray-300 rounded-full px-1.5 py-0.5 outline-none bg-transparent text-gray-500 cursor-pointer">
                     <option value="">+ add</option>
                     {(allUsers || []).filter(u => !responsaveis.includes(u.nome)).map(u => <option key={u.id} value={u.nome}>{u.nome}</option>)}
@@ -434,7 +446,13 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
         <div className="p-4 md:p-8 space-y-6 md:space-y-8 overflow-y-auto custom-scrollbar">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-gray-700 font-bold text-sm"><AlignLeft size={16}/> Descrição</div>
-            <textarea disabled={!podeEditarDescricao} value={desc} onChange={handleDescChange} onKeyDown={handleDescKeyDown} className="w-full h-24 md:h-32 p-3 md:p-4 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:bg-white text-sm font-mono shadow-inner resize-none" placeholder={podeEditarDescricao ? "Dica: Use '- ' para criar listas..." : "Apenas visualização."} />
+            {podeEditarDescricao ? (
+              <textarea value={desc} onChange={handleDescChange} onKeyDown={handleDescKeyDown} className="w-full h-24 md:h-32 p-3 md:p-4 bg-gray-50 rounded-xl border border-gray-200 outline-none focus:bg-white text-sm font-mono shadow-inner resize-none" placeholder="Dica: Use '- ' para criar listas ou cole um link..." />
+            ) : (
+              <div className="w-full min-h-[6rem] p-3 md:p-4 bg-gray-50 rounded-xl border border-gray-200 text-sm font-mono shadow-inner">
+                {desc ? renderTextWithLinks(desc) : <span className="text-gray-400">Sem descrição.</span>}
+              </div>
+            )}
           </div>
 
           {mostrarEtapas && (
@@ -545,11 +563,17 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                 let boxClass = "bg-gray-50 border-gray-100"; let badge = null;
                 if (isAdminComment) { boxClass = "bg-orange-50 border-orange-100"; badge = <span className="ml-2 text-[9px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>; } 
                 else if (isAuthorComment) { boxClass = "bg-emerald-50 border-emerald-100"; badge = <span className="ml-2 text-[9px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Solicitante</span>; }
+                const podeApagarComentario = isSuperAdmin || msg.autor === user.nome;
                 return (
                   <div key={msg.id} className={`p-3 rounded-xl border ${boxClass}`}>
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center"><span className="text-xs font-bold text-gray-800">{msg.autor}</span>{badge}</div>
-                      <span className="text-[10px] text-gray-400 font-semibold">{msg.data}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400 font-semibold">{msg.data}</span>
+                        {podeApagarComentario && (
+                          <button onClick={() => setComentarios(comentarios.filter(c => c.id !== msg.id))} className="text-red-400 hover:text-red-600 transition-colors p-0.5" title="Apagar comentário"><X size={13}/></button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm text-gray-700">{msg.texto}</p>
                   </div>
@@ -896,7 +920,7 @@ export default function App() {
 
                                         <div className="flex justify-between items-center mt-1 border-t pt-2 border-black/10">
                                           <div className="flex flex-wrap items-center gap-1">
-                                            <span className="text-xs text-gray-600 uppercase font-bold">Resp.:</span>
+                                            <span className="text-xs text-gray-600 uppercase font-bold">{col.id === 'col-1' ? 'Sol.:' : 'Resp.:'}</span>
                                             {(card.responsaveis?.length > 0 ? card.responsaveis : [card.autor]).filter(Boolean).map(nome => (
                                               <span key={nome} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>{nome}</span>
                                             ))}

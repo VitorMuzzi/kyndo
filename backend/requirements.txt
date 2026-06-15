@@ -3,3 +3,4 @@ uvicorn
 sqlalchemy
 bcrypt
 PyJWT
+python-dotenv
