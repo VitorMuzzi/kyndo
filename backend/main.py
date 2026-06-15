@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from sqlalchemy import create_engine, Column, String, Boolean, Integer, JSON
+from sqlalchemy import create_engine, Column, String, Boolean, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from datetime import datetime, timedelta
 import uuid
@@ -62,8 +62,16 @@ class CardDB(Base):
     data_criacao = Column(String)
     checklist = Column(JSON)
     comentarios = Column(JSON)
+    responsaveis = Column(JSON)
 
 Base.metadata.create_all(bind=engine)
+
+with engine.connect() as conn:
+    try:
+        conn.execute(text("ALTER TABLE cards ADD COLUMN responsaveis TEXT"))
+        conn.commit()
+    except Exception:
+        pass
 
 app = FastAPI(title="Kyndo API")
 
@@ -156,6 +164,7 @@ class CardSchema(BaseModel):
     prazo: str = ""
     checklist: List[Dict[str, Any]] = []
     comentarios: List[Dict[str, Any]] = []
+    responsaveis: List[str] = []
 
 # API Routes
 @app.post("/login")
@@ -244,7 +253,8 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
         prazo=card.prazo,
         data_criacao=data_atual,
         checklist=card.checklist,
-        comentarios=card.comentarios
+        comentarios=card.comentarios,
+        responsaveis=card.responsaveis if card.responsaveis else [card.autor]
     )
     db.add(novo)
     db.commit()
@@ -261,6 +271,7 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.prazo = card.prazo
         db_card.checklist = card.checklist
         db_card.comentarios = card.comentarios
+        db_card.responsaveis = card.responsaveis if card.responsaveis else [card.autor]
         db.commit()
     return {"msg": "atualizado"}
 

@@ -4,6 +4,23 @@ import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circ
 
 const API = 'http://localhost:8000';
 
+const USER_COLORS = [
+  'bg-blue-100 text-blue-700',
+  'bg-purple-100 text-purple-700',
+  'bg-orange-100 text-orange-700',
+  'bg-pink-100 text-pink-700',
+  'bg-teal-100 text-teal-700',
+  'bg-yellow-100 text-yellow-800',
+  'bg-red-100 text-red-700',
+  'bg-indigo-100 text-indigo-700',
+];
+
+const userColor = (nome = '') => {
+  let hash = 0;
+  for (const c of nome) hash += c.charCodeAt(0);
+  return USER_COLORS[hash % USER_COLORS.length];
+};
+
 // Auth wrapper
 const authFetch = (url, options = {}) => {
   const token = localStorage.getItem('demandaflow_token');
@@ -297,7 +314,10 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
   const [checklist, setChecklist] = useState(card?.checklist || []);
   const [prioridade, setPrioridade] = useState(card?.prioridade || 'Normal');
   const [comentarios, setComentarios] = useState(card?.comentarios || []);
-  const [prazo, setPrazo] = useState(card?.prazo || ''); 
+  const [prazo, setPrazo] = useState(card?.prazo || '');
+  const [responsaveis, setResponsaveis] = useState(
+    card?.responsaveis?.length > 0 ? card.responsaveis : (card?.autor ? [card.autor] : [user.nome])
+  );
   const [novaSubtarefa, setNovaSubtarefa] = useState('');
   const [novoComentario, setNovoComentario] = useState('');
   const [prioridadeAberto, setPrioridadeAberto] = useState(false);
@@ -309,6 +329,7 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
   const [novaSubetapa, setNovaSubetapa] = useState('');
 
   const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+  const isSuperAdmin = user.role === 'superadmin';
   const isAuthor = card?.autor === user.nome;
   
   const podeEditarDescricao = isAdmin || (col?.publica && (isAuthor || !card?.id));
@@ -329,7 +350,7 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
     }
   };
 
-  const addSubtarefa = () => { if (!novaSubtarefa.trim() || !isAdmin) return; setChecklist([...checklist, { id: `sub-${Date.now()}`, texto: novaSubtarefa, concluido: false }]); setNovaSubtarefa(''); };
+  const addSubtarefa = () => { if (!novaSubtarefa.trim() || !isAdmin) return; setChecklist([...checklist, { id: `sub-${Date.now()}`, texto: novaSubtarefa, concluido: false, criador: user.nome }]); setNovaSubtarefa(''); };
   const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: `msg-${Date.now()}`, autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
 
   const percentual = checklist.length > 0 ? Math.round(
@@ -376,7 +397,23 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 md:gap-4 text-[10px] md:text-xs font-bold uppercase tracking-widest mt-1">
-              <p className="text-gray-400">De: {card?.autor || user.nome}</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-gray-400 text-[10px] md:text-xs font-bold uppercase tracking-widest">Responsável:</span>
+                {responsaveis.map(nome => (
+                  <span key={nome} className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>
+                    {nome}
+                    {isSuperAdmin && responsaveis.length > 1 && (
+                      <button onClick={e => { e.stopPropagation(); setResponsaveis(responsaveis.filter(r => r !== nome)); }} className="hover:text-red-600 leading-none">×</button>
+                    )}
+                  </span>
+                ))}
+                {isSuperAdmin && (
+                  <select value="" onChange={e => { if (e.target.value && !responsaveis.includes(e.target.value)) setResponsaveis([...responsaveis, e.target.value]); }} className="text-[10px] font-bold border border-dashed border-gray-300 rounded-full px-1.5 py-0.5 outline-none bg-transparent text-gray-500 cursor-pointer">
+                    <option value="">+ add</option>
+                    {(allUsers || []).filter(u => !responsaveis.includes(u.nome)).map(u => <option key={u.id} value={u.nome}>{u.nome}</option>)}
+                  </select>
+                )}
+              </div>
               {card?.data_criacao && <p className="text-gray-400 hidden md:block">Criado em: {card.data_criacao}</p>}
               
               {mostrarPrazo && (
@@ -423,7 +460,8 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                               setChecklist(checklist.map(i => i.id === item.id ? {
                                 ...i,
                                 concluido: nowDone,
-                                subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true})) : (i.subetapas||[])
+                                concluidoPor: nowDone ? user.nome : null,
+                                subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true, concluidoPor: user.nome})) : (i.subetapas||[])
                               } : i));
                             }}
                             className={`${!isAdmin ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}
@@ -435,6 +473,8 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                           ) : (
                             <span className={`flex-1 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
+                          {item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
+                          {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}
                           {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={14}/></button>}
                           <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
                             {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
@@ -453,8 +493,8 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                             />
                             {isAdmin && (
                               <div className="flex gap-2">
-                                <input value={novaSubetapa} onChange={e => setNovaSubetapa(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novaSubetapa.trim()) { setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false}]} : i)); setNovaSubetapa(''); } }} className="flex-1 p-1.5 border rounded text-xs outline-none focus:border-emerald-400" placeholder="Adicionar sub-etapa..." />
-                                <button onClick={() => { if (!novaSubetapa.trim()) return; setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false}]} : i)); setNovaSubetapa(''); }} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold">Add</button>
+                                <input value={novaSubetapa} onChange={e => setNovaSubetapa(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novaSubetapa.trim()) { setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); } }} className="flex-1 p-1.5 border rounded text-xs outline-none focus:border-emerald-400" placeholder="Adicionar sub-etapa..." />
+                                <button onClick={() => { if (!novaSubetapa.trim()) return; setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); }} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold">Add</button>
                               </div>
                             )}
                           </div>
@@ -465,7 +505,7 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                           <div className="ml-7 pl-3 mt-1 border-l-2 border-gray-200 space-y-1">
                             {subetapas.map(sub => (
                               <div key={sub.id} className="flex items-center gap-2 group/sub">
-                                <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido} : s)} : i))} className="shrink-0 cursor-pointer hover:scale-110 transition-transform">
+                                <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido, concluidoPor: !s.concluido ? user.nome : null} : s)} : i))} className="shrink-0 cursor-pointer hover:scale-110 transition-transform">
                                   {sub.concluido ? <CheckCircle2 size={15} className="text-emerald-500"/> : <Circle size={15} className="text-gray-300"/>}
                                 </button>
                                 {isAdmin && editingSubItemId === sub.id ? (
@@ -473,6 +513,8 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                                 ) : (
                                   <span className={`flex-1 text-xs ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
                                 )}
+                                {sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
+                                {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}
                                 {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={12}/></button>}
                               </div>
                             ))}
@@ -523,7 +565,7 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
         <div className="p-3 md:p-4 bg-gray-100 flex justify-end gap-2 md:gap-3 border-t">
           {podeDeletar && <button onClick={() => onDelete(card.id)} className="text-red-600 px-2 py-2 md:px-4 font-bold text-[10px] md:text-sm mr-auto hover:bg-red-50 rounded-lg transition-colors">Excluir</button>}
           <button onClick={onClose} className="px-3 md:px-5 py-2 font-bold text-xs md:text-sm hover:bg-gray-200 rounded-lg transition-colors">Fechar</button>
-          <button onClick={() => onSave({...card, titulo, descricao: desc, checklist, prioridade, comentarios, prazo, autor: card?.autor || user.nome})} className="px-4 md:px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold text-xs md:text-sm shadow-lg hover:bg-emerald-700 transition-colors">Salvar Tudo</button>
+          <button onClick={() => onSave({...card, titulo, descricao: desc, checklist, prioridade, comentarios, prazo, autor: card?.autor || user.nome, responsaveis})} className="px-4 md:px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold text-xs md:text-sm shadow-lg hover:bg-emerald-700 transition-colors">Salvar Tudo</button>
         </div>
       </div>
     </div>
@@ -798,7 +840,7 @@ export default function App() {
                               {Object.values(cards)
                                 .filter(k => k.status === col.id)
                                 .filter(k => {
-                                  if (filtroAtivo === 'minhas') return k.autor === user.nome;
+                                  if (filtroAtivo === 'minhas') return k.autor === user.nome || (k.responsaveis || []).includes(user.nome);
                                   if (['Baixa', 'Normal', 'Alta', 'Urgente'].includes(filtroAtivo)) return k.prioridade === filtroAtivo;
                                   return true;
                                 })
@@ -840,7 +882,7 @@ export default function App() {
 
                                         <p className="text-base font-bold text-gray-800 leading-tight">{card.titulo}</p>
                                         
-                                        {totalEtapas > 0 && concluidas > 0 && (
+                                        {totalEtapas > 0 && progresso > 0 && (
                                           <div>
                                             <div className="flex justify-between items-center mb-1">
                                               <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Progresso</span>
@@ -853,7 +895,12 @@ export default function App() {
                                         )}
 
                                         <div className="flex justify-between items-center mt-1 border-t pt-2 border-black/10">
-                                          <p className="text-xs text-gray-600 uppercase font-bold">De: {card.autor}</p>
+                                          <div className="flex flex-wrap items-center gap-1">
+                                            <span className="text-xs text-gray-600 uppercase font-bold">Resp.:</span>
+                                            {(card.responsaveis?.length > 0 ? card.responsaveis : [card.autor]).filter(Boolean).map(nome => (
+                                              <span key={nome} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>{nome}</span>
+                                            ))}
+                                          </div>
                                           {qtdComentarios > 0 && (
                                             <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-white/60 px-1.5 rounded">
                                               <MessageSquare size={12} /> {qtdComentarios}
