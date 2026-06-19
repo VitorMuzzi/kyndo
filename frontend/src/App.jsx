@@ -476,11 +476,13 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                           ) : (
                             <span className={`flex-1 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
-                          {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
-                            ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
-                            : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
-                          {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
-                          {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={14}/></button>}
+                          <div className="ml-auto flex items-center gap-1 shrink-0">
+                            {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
+                              ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
+                              : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
+                              {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
+                            {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
+                          </div>
                         </div>
 
                         {/* Descrição — só aparece quando expandido */}
@@ -515,11 +517,13 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                                 ) : (
                                   <span className={`flex-1 text-xs ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
                                 )}
-                                {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
-                                  ? <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
-                                  : <>{sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
-                                {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
-                                {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={12}/></button>}
+                                <div className="ml-auto flex items-center gap-1 shrink-0">
+                                  {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
+                                    ? <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
+                                    : <>{sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
+                                    {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
+                                  {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={12}/></button>}
+                                </div>
                               </div>
                             ))}
                           </div>
