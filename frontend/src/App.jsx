@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circle, CheckCircle2, User, Lock, Unlock, Tag, MessageSquare, Filter, Send, Settings, Calendar, RefreshCw, LogOut, Users, Trash2, KeyRound, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
-const API = 'http://localhost:8000';
+const API = 'http://10.1.1.61:8095';
 
 const USER_COLORS = [
   'bg-blue-100 text-blue-700',
