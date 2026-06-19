@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circle, CheckCircle2, User, Lock, Unlock, Tag, MessageSquare, Filter, Send, Settings, Calendar, RefreshCw, LogOut, Users, Trash2, KeyRound, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, AlignLeft, MoreHorizontal, Archive, Palette, CheckSquare, Circle, CheckCircle2, User, Lock, Unlock, Tag, MessageSquare, Filter, Send, Settings, Calendar, RefreshCw, LogOut, Users, Trash2, KeyRound, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2 } from 'lucide-react';
 
 const API = 'http://10.1.1.61:8095';
 
@@ -473,8 +473,10 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                           ) : (
                             <span className={`flex-1 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
-                          {item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
-                          {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}
+                          {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
+                            ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
+                            : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
+                          {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
                           {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={14}/></button>}
                           <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
                             {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
@@ -513,8 +515,10 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                                 ) : (
                                   <span className={`flex-1 text-xs ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
                                 )}
-                                {sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
-                                {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}
+                                {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
+                                  ? <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
+                                  : <>{sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
+                                {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
                                 {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={12}/></button>}
                               </div>
                             ))}
@@ -587,6 +591,7 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [activeMenu, setActiveMenu] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(false);
   const [showLeftArrow, setShowLeftArrow] = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
@@ -649,6 +654,26 @@ export default function App() {
   };
 
   useEffect(() => { if(user && currentScreen === 'board') sync(); }, [user, currentScreen]);
+
+  useEffect(() => {
+    if (!user || currentScreen !== 'board') return;
+    const interval = setInterval(sync, 10000);
+    return () => clearInterval(interval);
+  }, [user, currentScreen]);
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   const handleLogin = (loggedUser) => {
     localStorage.setItem('demandaflow_token', loggedUser.token);
@@ -737,6 +762,9 @@ export default function App() {
         </div>
         
         <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto justify-end relative">
+          <button onClick={toggleFullscreen} className="hidden sm:flex items-center justify-center p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg" title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>
+            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+          </button>
           <button onClick={sync} className="hidden sm:flex items-center justify-center p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg">
             <RefreshCw size={18} className={isSyncing ? "animate-spin" : ""} />
           </button>
