@@ -468,6 +468,9 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                           >
                             {item.concluido ? <CheckCircle2 size={18} className="text-emerald-500"/> : <Circle size={18} className="text-gray-300"/>}
                           </button>
+                          <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
+                            {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                          </button>
                           {isAdmin && editingItemId === item.id ? (
                             <input value={editingItemText} onChange={e => setEditingItemText(e.target.value)} onBlur={() => { if (editingItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, texto: editingItemText.trim()} : i)); setEditingItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingItemId(null); }} className="flex-1 text-sm border-b-2 border-emerald-400 outline-none bg-transparent text-gray-700 py-0.5" autoFocus />
                           ) : (
@@ -478,9 +481,6 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                             : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
                           {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
                           {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all shrink-0"><X size={14}/></button>}
-                          <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
-                            {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
-                          </button>
                         </div>
 
                         {/* Descrição — só aparece quando expandido */}
