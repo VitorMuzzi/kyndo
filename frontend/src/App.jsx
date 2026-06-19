@@ -466,22 +466,22 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                             }}
                             className={`${!isAdmin ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}
                           >
-                            {item.concluido ? <CheckCircle2 size={18} className="text-emerald-500"/> : <Circle size={18} className="text-gray-300"/>}
-                          </button>
-                          <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors shrink-0" title="Descrição / observações">
-                            {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                            {item.concluido ? <CheckCircle2 size={16} className="text-emerald-500"/> : <Circle size={16} className="text-gray-300"/>}
                           </button>
                           {isAdmin && editingItemId === item.id ? (
-                            <input value={editingItemText} onChange={e => setEditingItemText(e.target.value)} onBlur={() => { if (editingItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, texto: editingItemText.trim()} : i)); setEditingItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingItemId(null); }} className="flex-1 text-sm border-b-2 border-emerald-400 outline-none bg-transparent text-gray-700 py-0.5" autoFocus />
+                            <input value={editingItemText} onChange={e => setEditingItemText(e.target.value)} onBlur={() => { if (editingItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, texto: editingItemText.trim()} : i)); setEditingItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingItemId(null); }} className="flex-1 min-w-0 text-sm border-b-2 border-emerald-400 outline-none bg-transparent text-gray-700 py-0.5" autoFocus />
                           ) : (
-                            <span className={`flex-1 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
+                            <span className={`flex-1 min-w-0 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
-                          <div className="ml-auto flex items-center gap-1 shrink-0">
+                          <div className="flex items-center gap-1 shrink-0">
                             {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
                               ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
                               : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}
                               {item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
                             {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
+                            <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors" title="Descrição / observações">
+                              {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+                            </button>
                           </div>
                         </div>
 
@@ -510,19 +510,19 @@ function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
                             {subetapas.map(sub => (
                               <div key={sub.id} className="flex items-center gap-2 group/sub">
                                 <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido, concluidoPor: !s.concluido ? user.nome : null} : s)} : i))} className="shrink-0 cursor-pointer hover:scale-110 transition-transform">
-                                  {sub.concluido ? <CheckCircle2 size={15} className="text-emerald-500"/> : <Circle size={15} className="text-gray-300"/>}
+                                  {sub.concluido ? <CheckCircle2 size={16} className="text-emerald-500"/> : <Circle size={16} className="text-gray-300"/>}
                                 </button>
                                 {isAdmin && editingSubItemId === sub.id ? (
-                                  <input value={editingSubItemText} onChange={e => setEditingSubItemText(e.target.value)} onBlur={() => { if (editingSubItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, texto: editingSubItemText.trim()} : s)} : i)); setEditingSubItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingSubItemId(null); }} className="flex-1 text-xs border-b border-emerald-400 outline-none bg-transparent py-0.5" autoFocus />
+                                  <input value={editingSubItemText} onChange={e => setEditingSubItemText(e.target.value)} onBlur={() => { if (editingSubItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, texto: editingSubItemText.trim()} : s)} : i)); setEditingSubItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingSubItemId(null); }} className="flex-1 min-w-0 text-sm border-b border-emerald-400 outline-none bg-transparent py-0.5" autoFocus />
                                 ) : (
-                                  <span className={`flex-1 text-xs ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
+                                  <span className={`flex-1 min-w-0 text-sm ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
                                 )}
-                                <div className="ml-auto flex items-center gap-1 shrink-0">
+                                <div className="flex items-center gap-1 shrink-0">
                                   {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
-                                    ? <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
-                                    : <>{sub.criador && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
-                                    {sub.concluido && sub.concluidoPor && <span className={`text-[9px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
-                                  {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={12}/></button>}
+                                    ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
+                                    : <>{sub.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}
+                                    {sub.concluido && sub.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
+                                  {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
                                 </div>
                               </div>
                             ))}
