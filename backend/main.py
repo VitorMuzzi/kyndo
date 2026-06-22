@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+﻿from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
@@ -63,12 +63,46 @@ class CardDB(Base):
     checklist = Column(JSON)
     comentarios = Column(JSON)
     responsaveis = Column(JSON)
+    github_url = Column(String, nullable=True)
+    sprint_id = Column(String, nullable=True)
+
+class NoteDB(Base):
+    __tablename__ = "notes"
+    user_id  = Column(String, primary_key=True, index=True)
+    conteudo = Column(String, default="")
+
+class SprintDB(Base):
+    __tablename__ = "sprints"
+    id = Column(String, primary_key=True, index=True)
+    nome = Column(String)
+    objetivo = Column(String, default="")
+    data_inicio = Column(String, default="")
+    data_fim = Column(String, default="")
+    ativo = Column(Boolean, default=False)
+    concluido = Column(Boolean, default=False)
+
+class UserNoteDB(Base):
+    __tablename__ = "user_notes"
+    id        = Column(String, primary_key=True, index=True)
+    user_id   = Column(String, index=True)
+    titulo    = Column(String, default="Nova Nota")
+    conteudo  = Column(String, default="")
+    tipo      = Column(String, default="texto")
+    canvas_data = Column(JSON, default=None)
+    criado_em = Column(String, default="")
 
 Base.metadata.create_all(bind=engine)
 
 with engine.connect() as conn:
     try:
         conn.execute(text("ALTER TABLE cards ADD COLUMN responsaveis TEXT"))
+        conn.commit()
+    except Exception:
+        pass
+
+with engine.connect() as conn:
+    try:
+        conn.execute(text("ALTER TABLE cards ADD COLUMN sprint_id VARCHAR"))
         conn.commit()
     except Exception:
         pass
@@ -118,6 +152,19 @@ def init_db():
     elif admin.role == "admin":
         admin.role = "superadmin"
     
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE cards ADD COLUMN github_url VARCHAR"))
+            conn.commit()
+    except Exception:
+        pass
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE cards ADD COLUMN sprint_id VARCHAR"))
+            conn.commit()
+    except Exception:
+        pass
+
     if db.query(ColumnDB).count() == 0:
         cols = [
             ColumnDB(id="col-1", titulo="IDEIAS DE PROJETOS", cor="#fef08a", ordem=0, publica=True),
@@ -165,6 +212,23 @@ class CardSchema(BaseModel):
     checklist: List[Dict[str, Any]] = []
     comentarios: List[Dict[str, Any]] = []
     responsaveis: List[str] = []
+    github_url: str = ""
+    sprint_id: Optional[str] = None
+
+class UserNoteSchema(BaseModel):
+    titulo: str = "Nova Nota"
+    conteudo: str = ""
+    tipo: str = "texto"
+    canvas_data: Optional[Dict[str, Any]] = None
+
+class SprintSchema(BaseModel):
+    id: Optional[str] = None
+    nome: str
+    objetivo: str = ""
+    data_inicio: str = ""
+    data_fim: str = ""
+    ativo: bool = False
+    concluido: bool = False
 
 # API Routes
 @app.post("/login")
@@ -254,7 +318,9 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
         data_criacao=data_atual,
         checklist=card.checklist,
         comentarios=card.comentarios,
-        responsaveis=card.responsaveis if card.responsaveis else [card.autor]
+        responsaveis=card.responsaveis if card.responsaveis else [card.autor],
+        github_url=card.github_url or None,
+        sprint_id=card.sprint_id or None,
     )
     db.add(novo)
     db.commit()
@@ -272,6 +338,8 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.checklist = card.checklist
         db_card.comentarios = card.comentarios
         db_card.responsaveis = card.responsaveis if card.responsaveis else [card.autor]
+        db_card.github_url = card.github_url or None
+        db_card.sprint_id = card.sprint_id or None
         db.commit()
     return {"msg": "atualizado"}
 
@@ -280,5 +348,88 @@ def delete_card(card_id: str, db: Session = Depends(get_db), current_user: UserD
     db_card = db.query(CardDB).filter(CardDB.id == card_id).first()
     if db_card:
         db.delete(db_card)
+        db.commit()
+    return {"msg": "deletado"}
+
+@app.get("/notes")
+def list_notes(current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(UserNoteDB).filter(UserNoteDB.user_id == current_user.id).order_by(UserNoteDB.criado_em.desc()).all()
+
+@app.post("/notes")
+def create_note(note: UserNoteSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    nova = UserNoteDB(
+        id=f"note-{uuid.uuid4().hex[:8]}",
+        user_id=current_user.id,
+        titulo=note.titulo,
+        conteudo=note.conteudo,
+        tipo=note.tipo,
+        canvas_data=note.canvas_data,
+        criado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+    )
+    db.add(nova)
+    db.commit()
+    db.refresh(nova)
+    return nova
+
+@app.put("/notes/{note_id}")
+def update_note(note_id: str, note: UserNoteSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id, UserNoteDB.user_id == current_user.id).first()
+    if db_note:
+        db_note.titulo = note.titulo
+        db_note.conteudo = note.conteudo
+        db_note.tipo = note.tipo
+        db_note.canvas_data = note.canvas_data
+        db.commit()
+    return {"ok": True}
+
+@app.delete("/notes/{note_id}")
+def delete_note(note_id: str, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id, UserNoteDB.user_id == current_user.id).first()
+    if db_note:
+        db.delete(db_note)
+        db.commit()
+    return {"ok": True}
+
+@app.get("/sprints")
+def get_sprints(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    return db.query(SprintDB).order_by(SprintDB.data_inicio).all()
+
+@app.post("/sprints")
+def create_sprint(sprint: SprintSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    if sprint.ativo:
+        db.query(SprintDB).update({"ativo": False})
+    nova = SprintDB(
+        id=f"sprint-{uuid.uuid4().hex[:8]}",
+        nome=sprint.nome,
+        objetivo=sprint.objetivo,
+        data_inicio=sprint.data_inicio,
+        data_fim=sprint.data_fim,
+        ativo=sprint.ativo,
+        concluido=sprint.concluido,
+    )
+    db.add(nova)
+    db.commit()
+    return nova
+
+@app.put("/sprints/{sprint_id}")
+def update_sprint(sprint_id: str, sprint: SprintSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    if sprint.ativo:
+        db.query(SprintDB).filter(SprintDB.id != sprint_id).update({"ativo": False})
+    db_sprint = db.query(SprintDB).filter(SprintDB.id == sprint_id).first()
+    if db_sprint:
+        db_sprint.nome = sprint.nome
+        db_sprint.objetivo = sprint.objetivo
+        db_sprint.data_inicio = sprint.data_inicio
+        db_sprint.data_fim = sprint.data_fim
+        db_sprint.ativo = sprint.ativo
+        db_sprint.concluido = sprint.concluido
+        db.commit()
+    return {"msg": "atualizado"}
+
+@app.delete("/sprints/{sprint_id}")
+def delete_sprint(sprint_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    db_sprint = db.query(SprintDB).filter(SprintDB.id == sprint_id).first()
+    if db_sprint:
+        db.delete(db_sprint)
         db.commit()
     return {"msg": "deletado"}
