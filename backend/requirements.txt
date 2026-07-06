@@ -1,5 +1,6 @@
-fastapi
-uvicorn
-sqlalchemy
-bcrypt
-PyJWT
+fastapi==0.136.3
+uvicorn==0.34.3
+sqlalchemy==2.0.40
+bcrypt==4.3.0
+PyJWT==2.10.1
+python-multipart==0.0.20

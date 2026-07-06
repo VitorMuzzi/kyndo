@@ -1,20 +1,35 @@
-﻿from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from sqlalchemy import create_engine, Column, String, Boolean, Integer, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import jwt
 import bcrypt
+import os
+import time
+from collections import defaultdict
 
-# Security config
-SECRET_KEY = "coloque_sua_chave_secreta_aqui"
+# Security config — set SECRET_KEY env var in production
+SECRET_KEY = os.getenv("SECRET_KEY", "coloque_sua_chave_secreta_aqui")
 ALGORITHM = "HS256"
 
 security = HTTPBearer()
+
+# In-memory rate limiter for /login
+_login_attempts: dict = defaultdict(list)
+_RATE_WINDOW = 60   # seconds
+_RATE_MAX    = 10   # attempts per window
+
+def check_rate_limit(ip: str):
+    now = time.time()
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
+    if len(_login_attempts[ip]) >= _RATE_MAX:
+        raise HTTPException(status_code=429, detail="Muitas tentativas. Aguarde 1 minuto.")
+    _login_attempts[ip].append(now)
 
 def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
@@ -24,8 +39,9 @@ def get_password_hash(password: str) -> str:
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
-# Database config
-SQLALCHEMY_DATABASE_URL = "sqlite:///./demandas.db"
+# Database config — path anchored to this file's directory, never relative to cwd
+_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demandas.db")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{_DB_PATH}"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -64,22 +80,12 @@ class CardDB(Base):
     comentarios = Column(JSON)
     responsaveis = Column(JSON)
     github_url = Column(String, nullable=True)
-    sprint_id = Column(String, nullable=True)
+    ordem = Column(Integer, default=0)
 
 class NoteDB(Base):
     __tablename__ = "notes"
     user_id  = Column(String, primary_key=True, index=True)
     conteudo = Column(String, default="")
-
-class SprintDB(Base):
-    __tablename__ = "sprints"
-    id = Column(String, primary_key=True, index=True)
-    nome = Column(String)
-    objetivo = Column(String, default="")
-    data_inicio = Column(String, default="")
-    data_fim = Column(String, default="")
-    ativo = Column(Boolean, default=False)
-    concluido = Column(Boolean, default=False)
 
 class UserNoteDB(Base):
     __tablename__ = "user_notes"
@@ -91,21 +97,25 @@ class UserNoteDB(Base):
     canvas_data = Column(JSON, default=None)
     criado_em = Column(String, default="")
 
+class DrawingDB(Base):
+    __tablename__ = "drawings"
+    user_id = Column(String, primary_key=True, index=True)
+    data    = Column(String, default="")
+
 Base.metadata.create_all(bind=engine)
 
-with engine.connect() as conn:
-    try:
-        conn.execute(text("ALTER TABLE cards ADD COLUMN responsaveis TEXT"))
-        conn.commit()
-    except Exception:
-        pass
-
-with engine.connect() as conn:
-    try:
-        conn.execute(text("ALTER TABLE cards ADD COLUMN sprint_id VARCHAR"))
-        conn.commit()
-    except Exception:
-        pass
+# Migrations
+for stmt in [
+    "ALTER TABLE cards ADD COLUMN responsaveis TEXT",
+    "ALTER TABLE cards ADD COLUMN github_url VARCHAR",
+    "ALTER TABLE cards ADD COLUMN ordem INTEGER DEFAULT 0",
+]:
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(stmt))
+            conn.commit()
+        except Exception:
+            pass
 
 app = FastAPI(title="Kyndo API")
 
@@ -124,7 +134,7 @@ def get_db():
     finally:
         db.close()
 
-# JWT Verification
+# Auth dependencies
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     token = credentials.credentials
     try:
@@ -136,11 +146,20 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=401, detail="Token expirado")
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
     return user
+
+def require_admin(current_user: UserDB = Depends(get_current_user)):
+    if current_user.role not in ('admin', 'superadmin'):
+        raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+    return current_user
+
+def require_superadmin(current_user: UserDB = Depends(get_current_user)):
+    if current_user.role != 'superadmin':
+        raise HTTPException(status_code=403, detail="Acesso restrito ao superadmin")
+    return current_user
 
 # DB Initialization
 def init_db():
@@ -151,19 +170,6 @@ def init_db():
         db.add(UserDB(id=str(uuid.uuid4()), nome="admin", senha=hashed_pw, role="superadmin", senha_temporaria=False))
     elif admin.role == "admin":
         admin.role = "superadmin"
-    
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE cards ADD COLUMN github_url VARCHAR"))
-            conn.commit()
-    except Exception:
-        pass
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE cards ADD COLUMN sprint_id VARCHAR"))
-            conn.commit()
-    except Exception:
-        pass
 
     if db.query(ColumnDB).count() == 0:
         cols = [
@@ -204,16 +210,20 @@ class ColSchema(BaseModel):
 class CardSchema(BaseModel):
     id: Optional[str] = None
     titulo: str
-    descricao: str = ""
+    descricao: Optional[str] = ""
     status: str
     prioridade: str = "Normal"
     autor: str
-    prazo: str = ""
+    prazo: Optional[str] = ""
     checklist: List[Dict[str, Any]] = []
     comentarios: List[Dict[str, Any]] = []
     responsaveis: List[str] = []
-    github_url: str = ""
-    sprint_id: Optional[str] = None
+    github_url: Optional[str] = ""
+    ordem: int = 0
+
+class CardReorderItem(BaseModel):
+    id: str
+    ordem: int
 
 class UserNoteSchema(BaseModel):
     titulo: str = "Nova Nota"
@@ -221,30 +231,24 @@ class UserNoteSchema(BaseModel):
     tipo: str = "texto"
     canvas_data: Optional[Dict[str, Any]] = None
 
-class SprintSchema(BaseModel):
-    id: Optional[str] = None
-    nome: str
-    objetivo: str = ""
-    data_inicio: str = ""
-    data_fim: str = ""
-    ativo: bool = False
-    concluido: bool = False
-
 # API Routes
 @app.post("/login")
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    check_rate_limit(client_ip)
+
     user = db.query(UserDB).filter(UserDB.nome == req.nome).first()
     if not user or not verify_password(req.senha, user.senha):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
-    
-    expire = datetime.utcnow() + timedelta(days=7)
+
+    expire = datetime.now(timezone.utc) + timedelta(days=7)
     to_encode = {"sub": user.id, "exp": expire}
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    
+
     return {
-        "id": user.id, 
-        "nome": user.nome, 
-        "role": user.role, 
+        "id": user.id,
+        "nome": user.nome,
+        "role": user.role,
         "senha_temporaria": user.senha_temporaria,
         "token": encoded_jwt
     }
@@ -254,7 +258,7 @@ def get_users(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
     return db.query(UserDB).all()
 
 @app.post("/users")
-def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: UserDB = Depends(require_admin)):
     if db.query(UserDB).filter(UserDB.nome == req.nome).first():
         raise HTTPException(status_code=400, detail="Usuário já existe")
     hashed_pw = get_password_hash(req.senha)
@@ -264,7 +268,7 @@ def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: Us
     return {"msg": "criado"}
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(require_superadmin)):
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if user and user.nome != "admin":
         db.delete(user)
@@ -272,12 +276,15 @@ def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserD
     return {"msg": "deletado"}
 
 @app.put("/users/{user_id}/password")
-def update_password(user_id: str, req: PasswordUpdate, db: Session = Depends(get_db)):
+def update_password(user_id: str, req: PasswordUpdate, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    if current_user.id != user_id and current_user.role not in ('admin', 'superadmin'):
+        raise HTTPException(status_code=403, detail="Sem permissão para alterar senha de outro usuário")
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
-    if user:
-        user.senha = get_password_hash(req.nova_senha)
-        user.senha_temporaria = False
-        db.commit()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    user.senha = get_password_hash(req.nova_senha)
+    user.senha_temporaria = False
+    db.commit()
     return {"msg": "senha atualizada"}
 
 @app.get("/columns")
@@ -285,17 +292,17 @@ def get_columns(db: Session = Depends(get_db), current_user: UserDB = Depends(ge
     return db.query(ColumnDB).filter(ColumnDB.arquivado == False).order_by(ColumnDB.ordem).all()
 
 @app.post("/columns")
-def create_column(col: ColSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    nova = ColumnDB(**col.dict())
+def create_column(col: ColSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(require_admin)):
+    nova = ColumnDB(**col.model_dump())
     db.add(nova)
     db.commit()
     return nova
 
 @app.put("/columns/{col_id}")
-def update_column(col_id: str, col: ColSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+def update_column(col_id: str, col: ColSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(require_admin)):
     db_col = db.query(ColumnDB).filter(ColumnDB.id == col_id).first()
     if db_col:
-        for key, value in col.dict().items():
+        for key, value in col.model_dump().items():
             setattr(db_col, key, value)
         db.commit()
     return {"msg": "atualizado"}
@@ -307,6 +314,7 @@ def get_cards(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
 @app.post("/cards")
 def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
     data_atual = datetime.now().strftime("%d/%m/%Y")
+    max_ordem = db.query(CardDB).filter(CardDB.status == card.status).count()
     novo = CardDB(
         id=f"card-{uuid.uuid4().hex[:8]}",
         titulo=card.titulo,
@@ -320,11 +328,21 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
         comentarios=card.comentarios,
         responsaveis=card.responsaveis if card.responsaveis else [card.autor],
         github_url=card.github_url or None,
-        sprint_id=card.sprint_id or None,
+        ordem=max_ordem,
     )
     db.add(novo)
     db.commit()
+    db.refresh(novo)
     return novo
+
+@app.put("/cards/reorder")
+def reorder_cards(reorders: List[CardReorderItem], db: Session = Depends(get_db), current_user: UserDB = Depends(require_admin)):
+    for r in reorders:
+        card = db.query(CardDB).filter(CardDB.id == r.id).first()
+        if card:
+            card.ordem = r.ordem
+    db.commit()
+    return {"ok": True}
 
 @app.put("/cards/{card_id}")
 def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
@@ -339,7 +357,7 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.comentarios = card.comentarios
         db_card.responsaveis = card.responsaveis if card.responsaveis else [card.autor]
         db_card.github_url = card.github_url or None
-        db_card.sprint_id = card.sprint_id or None
+        db_card.ordem = card.ordem
         db.commit()
     return {"msg": "atualizado"}
 
@@ -390,46 +408,21 @@ def delete_note(note_id: str, current_user: UserDB = Depends(get_current_user), 
         db.commit()
     return {"ok": True}
 
-@app.get("/sprints")
-def get_sprints(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    return db.query(SprintDB).order_by(SprintDB.data_inicio).all()
+class DrawingSchema(BaseModel):
+    data: str = ""
 
-@app.post("/sprints")
-def create_sprint(sprint: SprintSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    if sprint.ativo:
-        db.query(SprintDB).update({"ativo": False})
-    nova = SprintDB(
-        id=f"sprint-{uuid.uuid4().hex[:8]}",
-        nome=sprint.nome,
-        objetivo=sprint.objetivo,
-        data_inicio=sprint.data_inicio,
-        data_fim=sprint.data_fim,
-        ativo=sprint.ativo,
-        concluido=sprint.concluido,
-    )
-    db.add(nova)
+@app.get("/drawing/me")
+def get_drawing(current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    d = db.query(DrawingDB).filter(DrawingDB.user_id == current_user.id).first()
+    return {"data": d.data if d else ""}
+
+@app.put("/drawing/me")
+def save_drawing(body: DrawingSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    d = db.query(DrawingDB).filter(DrawingDB.user_id == current_user.id).first()
+    if d:
+        d.data = body.data
+    else:
+        db.add(DrawingDB(user_id=current_user.id, data=body.data))
     db.commit()
-    return nova
+    return {"ok": True}
 
-@app.put("/sprints/{sprint_id}")
-def update_sprint(sprint_id: str, sprint: SprintSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    if sprint.ativo:
-        db.query(SprintDB).filter(SprintDB.id != sprint_id).update({"ativo": False})
-    db_sprint = db.query(SprintDB).filter(SprintDB.id == sprint_id).first()
-    if db_sprint:
-        db_sprint.nome = sprint.nome
-        db_sprint.objetivo = sprint.objetivo
-        db_sprint.data_inicio = sprint.data_inicio
-        db_sprint.data_fim = sprint.data_fim
-        db_sprint.ativo = sprint.ativo
-        db_sprint.concluido = sprint.concluido
-        db.commit()
-    return {"msg": "atualizado"}
-
-@app.delete("/sprints/{sprint_id}")
-def delete_sprint(sprint_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    db_sprint = db.query(SprintDB).filter(SprintDB.id == sprint_id).first()
-    if db_sprint:
-        db.delete(db_sprint)
-        db.commit()
-    return {"msg": "deletado"}
