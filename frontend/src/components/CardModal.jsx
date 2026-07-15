@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
+import { API, authFetch } from '../api.js';
 
-export default function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete }) {
+export default function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete, onOpenLinkedItem }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
   const [desc, setDesc] = useState(card?.descricao || '');
   const [checklist, setChecklist] = useState(card?.checklist || []);
@@ -24,6 +25,14 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
   const [editingSubItemId, setEditingSubItemId] = useState(null);
   const [editingSubItemText, setEditingSubItemText] = useState('');
   const [novaSubetapa, setNovaSubetapa] = useState('');
+  const [linkedNotes, setLinkedNotes] = useState([]);
+  const [linkedDrawings, setLinkedDrawings] = useState([]);
+
+  useEffect(() => {
+    if (!card?.id) return;
+    authFetch(`${API}/notes?card_id=${card.id}`).then(r => r.ok ? r.json() : []).then(setLinkedNotes);
+    authFetch(`${API}/drawings?card_id=${card.id}`).then(r => r.ok ? r.json() : []).then(setLinkedDrawings);
+  }, [card?.id]);
 
   const isAdmin = user.role === 'admin' || user.role === 'superadmin';
   const isSuperAdmin = user.role === 'superadmin';
@@ -34,6 +43,12 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
   const mostrarPrioridade = isAdmin || prioridade !== 'Normal' || col?.id !== 'col-1';
   const mostrarPrazo = isAdmin || prazo;
   const mostrarEtapas = isAdmin || checklist.length > 0;
+
+  const normalizeGithubUrl = (url) => {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  };
 
   const handleDescChange = (e) => { setDesc(e.target.value.replace(/(^|\n)-\s/g, '$1• ')); };
   const handleDescKeyDown = (e) => {
@@ -136,9 +151,9 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                       <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Repositório GitHub</p>
                       <div className="flex gap-1.5">
                         <input autoFocus type="text" value={githubUrlTemp} onChange={e => setGithubUrlTemp(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') { setGithubUrl(githubUrlTemp); setGithubMenuAberto(false); } if (e.key === 'Escape') setGithubMenuAberto(false); }}
-                          placeholder="https://github.com/..." className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-emerald-400"/>
-                        <button onClick={() => { setGithubUrl(githubUrlTemp); setGithubMenuAberto(false); }} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors">OK</button>
+                          onKeyDown={e => { if (e.key === 'Enter') { setGithubUrl(normalizeGithubUrl(githubUrlTemp)); setGithubMenuAberto(false); } if (e.key === 'Escape') setGithubMenuAberto(false); }}
+                          placeholder="github.com/usuario/repo" className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-emerald-400"/>
+                        <button onClick={() => { setGithubUrl(normalizeGithubUrl(githubUrlTemp)); setGithubMenuAberto(false); }} className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors">OK</button>
                       </div>
                       {githubUrl && (
                         <button onClick={() => { setGithubUrl(''); setGithubUrlTemp(''); setGithubMenuAberto(false); }} className="mt-2 text-[10px] text-red-400 hover:text-red-600 font-bold">Remover repositório</button>
@@ -243,6 +258,26 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
               </div>
               <hr className="border-gray-200"/>
             </>
+          )}
+
+          {(linkedNotes.length > 0 || linkedDrawings.length > 0) && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-gray-700 font-bold text-sm"><FileText size={16}/> Notas e Desenhos vinculados</div>
+              <div className="flex flex-wrap gap-2">
+                {linkedNotes.map(n => (
+                  <button key={n.id} onClick={() => onOpenLinkedItem?.('nota', n.id)}
+                    className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
+                    <FileText size={13} className="text-emerald-600"/> {n.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400"/>
+                  </button>
+                ))}
+                {linkedDrawings.map(d => (
+                  <button key={d.id} onClick={() => onOpenLinkedItem?.('desenho', d.id)}
+                    className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
+                    <PenLine size={13} className="text-emerald-600"/> {d.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400"/>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="space-y-4">

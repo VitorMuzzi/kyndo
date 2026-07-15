@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NODE_COLORS } from '../constants.jsx';
 
-export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenNote }) {
+export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenNote, readOnly = false }) {
   const [nodes, setNodes]           = useState(() => data?.nodes || []);
   const [edges, setEdges]           = useState(() => data?.edges || []);
   const [pan, setPan]               = useState({ x: 100, y: 60 });
@@ -82,6 +82,7 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
   const onBgUp   = ()  => { panning.current = false; };
   const onWheel  = (e) => { e.preventDefault(); setZoom(z => Math.max(0.15, Math.min(4, z * (e.deltaY < 0 ? 1.12 : 0.9)))); };
   const onBgDbl  = (e) => {
+    if (readOnly) return;
     const pos = toCanvas(e.clientX, e.clientY);
     const id = genId();
     const n = { id, x: pos.x - 55, y: pos.y - 22, text: '', color: 'blue' };
@@ -91,6 +92,7 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
 
   const onNodeDown = (e, node) => {
     e.stopPropagation();
+    if (readOnly) { setSelected({ type: 'node', id: node.id }); return; }
     if (editingId && editingId !== node.id) { finishEdit(editingId); return; }
     if (editingId === node.id) return;
     if (connecting) {
@@ -116,10 +118,12 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
   const onNodeDbl = (e, node) => {
     e.stopPropagation();
     if (node.linkedNoteId) { onOpenNote(node.linkedNoteId); return; }
+    if (readOnly) return;
     startEdit(node);
   };
 
   const startResize = (e, node, dir) => {
+    if (readOnly) return;
     e.stopPropagation();
     const el = e.currentTarget.parentElement;
     const rect = el.getBoundingClientRect();
@@ -143,6 +147,7 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
       if (editingId) { if (e.key === 'Escape') finishEdit(editingId); return; }
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       if (e.key === 'Escape') { setConnecting(null); return; }
+      if (readOnly) return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         if (selected.type === 'node') {
           const nn = nodesRef.current.filter(n => n.id !== selected.id);
@@ -157,15 +162,16 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
     };
     window.addEventListener('keydown', kd);
     return () => window.removeEventListener('keydown', kd);
-  }, [editingId, selected]);
+  }, [editingId, selected, readOnly]);
 
   const changeColor = (color) => {
-    if (!selected || selected.type !== 'node') return;
+    if (readOnly || !selected || selected.type !== 'node') return;
     const nxt = nodesRef.current.map(n => n.id === selected.id ? { ...n, color } : n);
     setNodes(nxt); nodesRef.current = nxt; doSave();
   };
 
   const addNode = () => {
+    if (readOnly) return;
     const id = genId();
     const n = { id, x: 180 + nodesRef.current.length * 18, y: 120 + nodesRef.current.length * 18, text: '', color: 'blue' };
     const nxt = [...nodesRef.current, n]; setNodes(nxt); nodesRef.current = nxt; doSave();
@@ -173,14 +179,14 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
   };
 
   const addNoteLink = (note) => {
-    if (!note) return;
+    if (readOnly || !note) return;
     const id = genId();
     const n = { id, x: 200 + nodesRef.current.length * 18, y: 160 + nodesRef.current.length * 18, text: note.titulo, color: 'blue', w: 160, linkedNoteId: note.id };
     const nxt = [...nodesRef.current, n]; setNodes(nxt); nodesRef.current = nxt; doSave();
   };
 
   const deleteSelected = () => {
-    if (!selected) return;
+    if (readOnly || !selected) return;
     if (selected.type === 'node') {
       const nn = nodesRef.current.filter(n => n.id !== selected.id);
       const ee = edgesRef.current.filter(ed => ed.from !== selected.id && ed.to !== selected.id);
@@ -200,6 +206,7 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
   };
 
   const startBendDrag = (e, edge) => {
+    if (readOnly) return;
     e.stopPropagation();
     const startX = e.clientX, startY = e.clientY;
     const origBend = { x: edge.bend?.x || 0, y: edge.bend?.y || 0 };
@@ -227,29 +234,33 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="shrink-0 flex items-center gap-1.5 px-3 py-2 border-b border-white/5 bg-black/10 flex-wrap">
-        <button onClick={addNode} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors">+ Balão</button>
-        {allNotes.length > 0 && (
-          <select value={linkVal} onChange={e => { const n = allNotes.find(x => x.id === e.target.value); addNoteLink(n); setLinkVal(''); }}
-            className="text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer"
-            style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.15)' }}>
-            <option value="" style={{ background: '#1e293b', color: '#e2e8f0' }}>+ Link de Nota</option>
-            {allNotes.map(n => <option key={n.id} value={n.id} style={{ background: '#1e293b', color: '#e2e8f0' }}>{n.titulo || 'Sem título'}</option>)}
-          </select>
-        )}
-        {selNode && (<>
-          <div className="w-px h-4 bg-white/10 mx-0.5"/>
-          {Object.entries(NODE_COLORS).map(([k, c]) => (
-            <button key={k} onClick={() => changeColor(k)} style={{ backgroundColor: c.bg, border: `2px solid ${c.border}` }}
-              className={`w-5 h-5 rounded-full transition-transform ${selNode.color === k ? 'scale-125 shadow-md' : 'hover:scale-110'}`}/>
-          ))}
-          <div className="w-px h-4 bg-white/10 mx-0.5"/>
-          <button onClick={deleteSelected} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors">✕ Deletar</button>
+        {readOnly ? (
+          <span className="text-white/25 text-[11px] font-bold uppercase tracking-widest">Somente leitura</span>
+        ) : (<>
+          <button onClick={addNode} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors">+ Balão</button>
+          {allNotes.length > 0 && (
+            <select value={linkVal} onChange={e => { const n = allNotes.find(x => x.id === e.target.value); addNoteLink(n); setLinkVal(''); }}
+              className="text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer"
+              style={{ background: '#1e293b', color: '#e2e8f0', border: '1px solid rgba(255,255,255,0.15)' }}>
+              <option value="" style={{ background: '#1e293b', color: '#e2e8f0' }}>+ Link de Nota</option>
+              {allNotes.map(n => <option key={n.id} value={n.id} style={{ background: '#1e293b', color: '#e2e8f0' }}>{n.titulo || 'Sem título'}</option>)}
+            </select>
+          )}
+          {selNode && (<>
+            <div className="w-px h-4 bg-white/10 mx-0.5"/>
+            {Object.entries(NODE_COLORS).map(([k, c]) => (
+              <button key={k} onClick={() => changeColor(k)} style={{ backgroundColor: c.bg, border: `2px solid ${c.border}` }}
+                className={`w-5 h-5 rounded-full transition-transform ${selNode.color === k ? 'scale-125 shadow-md' : 'hover:scale-110'}`}/>
+            ))}
+            <div className="w-px h-4 bg-white/10 mx-0.5"/>
+            <button onClick={deleteSelected} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors">✕ Deletar</button>
+          </>)}
+          {selected?.type === 'edge' && (
+            <button onClick={deleteSelected} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors">✕ Deletar ligação</button>
+          )}
+          {connecting && <span className="text-emerald-300 text-[11px] font-bold animate-pulse ml-2">Clique em outro balão para conectar · ESC cancela</span>}
+          <span className="text-white/18 text-[10px] font-mono ml-auto hidden md:block">2× clique = balão · scroll = zoom · Del = apagar</span>
         </>)}
-        {selected?.type === 'edge' && (
-          <button onClick={deleteSelected} className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition-colors">✕ Deletar ligação</button>
-        )}
-        {connecting && <span className="text-emerald-300 text-[11px] font-bold animate-pulse ml-2">Clique em outro balão para conectar · ESC cancela</span>}
-        <span className="text-white/18 text-[10px] font-mono ml-auto hidden md:block">2× clique = balão · scroll = zoom · Del = apagar</span>
       </div>
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden select-none"
@@ -313,11 +324,11 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
                     {node.text || <em style={{ opacity: 0.32, fontSize: nodeFontSize * 0.85, fontStyle: 'normal' }}>duplo clique</em>}
                   </span>
                 )}
-                {isSel && !isEditing && !connecting && (
+                {!readOnly && isSel && !isEditing && !connecting && (
                   <div style={{ position: 'absolute', right: -20, top: '50%', transform: 'translateY(-50%)', width: 20, height: 20, borderRadius: '50%', background: '#10b981', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 900, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 10 }}
                     onMouseDown={e => { e.stopPropagation(); setConnecting(node.id); }} title="Conectar a outro balão">→</div>
                 )}
-                {isSel && !isEditing && (<>
+                {!readOnly && isSel && !isEditing && (<>
                   <div style={{ position: 'absolute', right: -5, top: '50%', transform: 'translateY(-50%)', width: 9, height: 30, borderRadius: 5, background: '#60a5fa', cursor: 'e-resize', boxShadow: '0 1px 4px rgba(0,0,0,0.35)', opacity: 0.9 }} onMouseDown={e => startResize(e, node, 'e')} title="Largura"/>
                   <div style={{ position: 'absolute', bottom: -5, left: '50%', transform: 'translateX(-50%)', width: 30, height: 9, borderRadius: 5, background: '#60a5fa', cursor: 's-resize', boxShadow: '0 1px 4px rgba(0,0,0,0.35)', opacity: 0.9 }} onMouseDown={e => startResize(e, node, 's')} title="Altura"/>
                   <div style={{ position: 'absolute', right: -5, bottom: -5, width: 13, height: 13, borderRadius: '2px 6px 6px 6px', background: '#93c5fd', cursor: 'se-resize', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }} onMouseDown={e => startResize(e, node, 'se')} title="Largura e altura"/>

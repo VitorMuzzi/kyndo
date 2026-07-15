@@ -81,6 +81,15 @@ class CardDB(Base):
     responsaveis = Column(JSON)
     github_url = Column(String, nullable=True)
     ordem = Column(Integer, default=0)
+    updated_em = Column(String, default="")
+    alteracoes = Column(Integer, default=0)
+
+class CardSeenDB(Base):
+    __tablename__ = "card_seen"
+    card_id      = Column(String, primary_key=True, index=True)
+    user_id      = Column(String, primary_key=True, index=True)
+    visto_em     = Column(String, default="")
+    visto_versao = Column(Integer, default=0)
 
 class NoteDB(Base):
     __tablename__ = "notes"
@@ -96,19 +105,86 @@ class UserNoteDB(Base):
     tipo      = Column(String, default="texto")
     canvas_data = Column(JSON, default=None)
     criado_em = Column(String, default="")
+    card_id   = Column(String, nullable=True, default=None)
+    publico   = Column(Boolean, default=False)
+    compartilhado_com = Column(JSON, default=list)
 
 class DrawingDB(Base):
     __tablename__ = "drawings"
-    user_id = Column(String, primary_key=True, index=True)
-    data    = Column(String, default="")
+    id        = Column(String, primary_key=True, index=True)
+    user_id   = Column(String, index=True)
+    titulo    = Column(String, default="Novo Desenho")
+    data      = Column(String, default="")
+    criado_em = Column(String, default="")
+    card_id   = Column(String, nullable=True, default=None)
+    publico   = Column(Boolean, default=False)
+    compartilhado_com = Column(JSON, default=list)
+
+def _migrate_drawings_table():
+    """The old 'drawings' table was a singleton (user_id as PK, no id/titulo).
+    create_all() never touches an existing table, so rename it out of the way
+    first; the new schema gets created fresh below, then legacy rows get
+    copied in by _copy_legacy_drawings(). Idempotent: no-ops once already migrated."""
+    with engine.connect() as conn:
+        exists = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='drawings'"
+        )).fetchone()
+        if not exists:
+            return
+        cols = [row[1] for row in conn.execute(text("PRAGMA table_info(drawings)"))]
+        if 'id' in cols:
+            return
+        conn.execute(text("ALTER TABLE drawings RENAME TO drawings_old_singleton"))
+        # SQLite keeps index names attached across a table rename; drop it so
+        # create_all() below can create a same-named index on the new table.
+        conn.execute(text("DROP INDEX IF EXISTS ix_drawings_user_id"))
+        conn.commit()
+
+_migrate_drawings_table()
 
 Base.metadata.create_all(bind=engine)
+
+def _copy_legacy_drawings():
+    with engine.connect() as conn:
+        old = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='drawings_old_singleton'"
+        )).fetchone()
+        if not old:
+            return
+        rows = conn.execute(text("SELECT user_id, data FROM drawings_old_singleton")).fetchall()
+        for user_id, data in rows:
+            if not data:
+                continue
+            dup = conn.execute(
+                text("SELECT 1 FROM drawings WHERE user_id=:uid LIMIT 1"), {"uid": user_id}
+            ).fetchone()
+            if dup:
+                continue
+            conn.execute(text(
+                "INSERT INTO drawings (id, user_id, titulo, data, criado_em, card_id, publico, compartilhado_com) "
+                "VALUES (:id, :uid, :titulo, :data, :criado_em, NULL, 0, '[]')"
+            ), {
+                "id": f"drawing-{uuid.uuid4().hex[:8]}",
+                "uid": user_id,
+                "titulo": "Meu Desenho",
+                "data": data,
+                "criado_em": datetime.now().strftime("%d/%m/%Y %H:%M"),
+            })
+        conn.commit()
+
+_copy_legacy_drawings()
 
 # Migrations
 for stmt in [
     "ALTER TABLE cards ADD COLUMN responsaveis TEXT",
     "ALTER TABLE cards ADD COLUMN github_url VARCHAR",
     "ALTER TABLE cards ADD COLUMN ordem INTEGER DEFAULT 0",
+    "ALTER TABLE cards ADD COLUMN updated_em VARCHAR",
+    "ALTER TABLE cards ADD COLUMN alteracoes INTEGER DEFAULT 0",
+    "ALTER TABLE card_seen ADD COLUMN visto_versao INTEGER DEFAULT 0",
+    "ALTER TABLE user_notes ADD COLUMN card_id VARCHAR",
+    "ALTER TABLE user_notes ADD COLUMN publico BOOLEAN DEFAULT 0",
+    "ALTER TABLE user_notes ADD COLUMN compartilhado_com TEXT DEFAULT '[]'",
 ]:
     with engine.connect() as conn:
         try:
@@ -116,6 +192,30 @@ for stmt in [
             conn.commit()
         except Exception:
             pass
+
+def _backfill_card_notifications():
+    """Cards created before the notification feature shipped have no
+    updated_em/card_seen rows. Backfill both with the SAME timestamp so
+    nobody gets a flood of false 'changed' badges on pre-existing cards —
+    only edits made after this point should ever trigger a badge."""
+    now_iso = datetime.now().isoformat()
+    with engine.connect() as conn:
+        conn.execute(text("UPDATE cards SET updated_em = :now WHERE updated_em IS NULL OR updated_em = ''"), {"now": now_iso})
+        card_ids = [r[0] for r in conn.execute(text("SELECT id FROM cards"))]
+        user_ids = [r[0] for r in conn.execute(text("SELECT id FROM users"))]
+        for cid in card_ids:
+            for uid in user_ids:
+                exists = conn.execute(
+                    text("SELECT 1 FROM card_seen WHERE card_id=:cid AND user_id=:uid"), {"cid": cid, "uid": uid}
+                ).fetchone()
+                if exists:
+                    continue
+                conn.execute(text(
+                    "INSERT INTO card_seen (card_id, user_id, visto_em) VALUES (:cid, :uid, :now)"
+                ), {"cid": cid, "uid": uid, "now": now_iso})
+        conn.commit()
+
+_backfill_card_notifications()
 
 app = FastAPI(title="Kyndo API")
 
@@ -225,11 +325,25 @@ class CardReorderItem(BaseModel):
     id: str
     ordem: int
 
+class ShareEntry(BaseModel):
+    user_id: str
+    nivel: str  # 'ver' | 'editar'
+
 class UserNoteSchema(BaseModel):
     titulo: str = "Nova Nota"
     conteudo: str = ""
     tipo: str = "texto"
     canvas_data: Optional[Dict[str, Any]] = None
+    card_id: Optional[str] = None
+    publico: bool = False
+    compartilhado_com: List[ShareEntry] = []
+
+class DrawingSchema(BaseModel):
+    titulo: str = "Novo Desenho"
+    data: str = ""
+    card_id: Optional[str] = None
+    publico: bool = False
+    compartilhado_com: List[ShareEntry] = []
 
 # API Routes
 @app.post("/login")
@@ -307,13 +421,29 @@ def update_column(col_id: str, col: ColSchema, db: Session = Depends(get_db), cu
         db.commit()
     return {"msg": "atualizado"}
 
+def _serialize_card(c: CardDB, visto_versao):
+    alteracoes_nao_vistas = max(0, (c.alteracoes or 0) - (visto_versao or 0))
+    return {
+        "id": c.id, "titulo": c.titulo, "descricao": c.descricao, "status": c.status,
+        "prioridade": c.prioridade, "autor": c.autor, "prazo": c.prazo,
+        "data_criacao": c.data_criacao, "checklist": c.checklist, "comentarios": c.comentarios,
+        "responsaveis": c.responsaveis, "github_url": c.github_url, "ordem": c.ordem,
+        "updated_em": c.updated_em,
+        "alteracoes_nao_vistas": alteracoes_nao_vistas,
+        "nao_visto": alteracoes_nao_vistas > 0,
+    }
+
 @app.get("/cards")
 def get_cards(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    return db.query(CardDB).all()
+    all_cards = db.query(CardDB).all()
+    seen_map = {s.card_id: s.visto_versao for s in db.query(CardSeenDB).filter(CardSeenDB.user_id == current_user.id).all()}
+    return [_serialize_card(c, seen_map.get(c.id)) for c in all_cards]
 
 @app.post("/cards")
 def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
-    data_atual = datetime.now().strftime("%d/%m/%Y")
+    now = datetime.now()
+    data_atual = now.strftime("%d/%m/%Y")
+    now_iso = now.isoformat()
     max_ordem = db.query(CardDB).filter(CardDB.status == card.status).count()
     novo = CardDB(
         id=f"card-{uuid.uuid4().hex[:8]}",
@@ -329,8 +459,12 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
         responsaveis=card.responsaveis if card.responsaveis else [card.autor],
         github_url=card.github_url or None,
         ordem=max_ordem,
+        updated_em=now_iso,
     )
     db.add(novo)
+    # The creator has obviously "seen" the card they just made — everyone else has no
+    # seen row yet, so it naturally shows up as a new/unseen card for them.
+    db.add(CardSeenDB(card_id=novo.id, user_id=current_user.id, visto_em=now_iso, visto_versao=0))
     db.commit()
     db.refresh(novo)
     return novo
@@ -358,6 +492,16 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.responsaveis = card.responsaveis if card.responsaveis else [card.autor]
         db_card.github_url = card.github_url or None
         db_card.ordem = card.ordem
+        now_iso = datetime.now().isoformat()
+        db_card.updated_em = now_iso
+        db_card.alteracoes = (db_card.alteracoes or 0) + 1
+        # The editor made this change themselves — it shouldn't show up as "unseen" for them.
+        seen_row = db.query(CardSeenDB).filter(CardSeenDB.card_id == card_id, CardSeenDB.user_id == current_user.id).first()
+        if seen_row:
+            seen_row.visto_em = now_iso
+            seen_row.visto_versao = db_card.alteracoes
+        else:
+            db.add(CardSeenDB(card_id=card_id, user_id=current_user.id, visto_em=now_iso, visto_versao=db_card.alteracoes))
         db.commit()
     return {"msg": "atualizado"}
 
@@ -366,12 +510,74 @@ def delete_card(card_id: str, db: Session = Depends(get_db), current_user: UserD
     db_card = db.query(CardDB).filter(CardDB.id == card_id).first()
     if db_card:
         db.delete(db_card)
+        db.query(CardSeenDB).filter(CardSeenDB.card_id == card_id).delete()
         db.commit()
     return {"msg": "deletado"}
 
+@app.post("/cards/{card_id}/seen")
+def mark_card_seen(card_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    db_card = db.query(CardDB).filter(CardDB.id == card_id).first()
+    if not db_card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    now_iso = datetime.now().isoformat()
+    row = db.query(CardSeenDB).filter(CardSeenDB.card_id == card_id, CardSeenDB.user_id == current_user.id).first()
+    if row:
+        row.visto_em = now_iso
+        row.visto_versao = db_card.alteracoes
+    else:
+        db.add(CardSeenDB(card_id=card_id, user_id=current_user.id, visto_em=now_iso, visto_versao=db_card.alteracoes))
+    db.commit()
+    return {"ok": True}
+
+def compute_permission(item, current_user: UserDB, cards_by_id: dict):
+    """Owner > explicit share > public-via-linked-card's responsáveis > no access."""
+    if item.user_id == current_user.id:
+        return 'owner'
+    for share in (item.compartilhado_com or []):
+        if share.get('user_id') == current_user.id:
+            return share.get('nivel')
+    if item.publico and item.card_id:
+        card = cards_by_id.get(item.card_id)
+        if card and current_user.nome in (card.responsaveis or []):
+            return 'editar'
+    return None
+
+def _serialize_note(n: UserNoteDB, perm: str):
+    return {
+        "id": n.id, "user_id": n.user_id, "titulo": n.titulo, "conteudo": n.conteudo,
+        "tipo": n.tipo, "canvas_data": n.canvas_data, "criado_em": n.criado_em,
+        "card_id": n.card_id, "publico": n.publico, "compartilhado_com": n.compartilhado_com or [],
+        "owner": perm == 'owner', "pode_editar": perm in ('owner', 'editar'),
+    }
+
+def _serialize_drawing(d: DrawingDB, perm: str):
+    return {
+        "id": d.id, "user_id": d.user_id, "titulo": d.titulo, "data": d.data, "criado_em": d.criado_em,
+        "card_id": d.card_id, "publico": d.publico, "compartilhado_com": d.compartilhado_com or [],
+        "owner": perm == 'owner', "pode_editar": perm in ('owner', 'editar'),
+    }
+
+def _check_share_fields_change(payload, db_item, perm: str):
+    if perm == 'owner':
+        return
+    if perm != 'editar':
+        raise HTTPException(status_code=403, detail="Você só tem permissão de visualização neste item")
+    novo_compartilhado = [s.model_dump() for s in payload.compartilhado_com]
+    if (payload.card_id != db_item.card_id or payload.publico != db_item.publico or
+            novo_compartilhado != (db_item.compartilhado_com or [])):
+        raise HTTPException(status_code=403, detail="Apenas o dono pode alterar compartilhamento, público ou tarefa vinculada")
+
 @app.get("/notes")
-def list_notes(current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    return db.query(UserNoteDB).filter(UserNoteDB.user_id == current_user.id).order_by(UserNoteDB.criado_em.desc()).all()
+def list_notes(card_id: Optional[str] = None, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    cards_by_id = {c.id: c for c in db.query(CardDB).all()}
+    notes = db.query(UserNoteDB).order_by(UserNoteDB.criado_em.desc()).all()
+    result = []
+    for n in notes:
+        perm = compute_permission(n, current_user, cards_by_id)
+        if perm is None or (card_id and n.card_id != card_id):
+            continue
+        result.append(_serialize_note(n, perm))
+    return result
 
 @app.post("/notes")
 def create_note(note: UserNoteSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -383,46 +589,103 @@ def create_note(note: UserNoteSchema, current_user: UserDB = Depends(get_current
         tipo=note.tipo,
         canvas_data=note.canvas_data,
         criado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        card_id=note.card_id,
+        publico=note.publico,
+        compartilhado_com=[s.model_dump() for s in note.compartilhado_com],
     )
     db.add(nova)
     db.commit()
     db.refresh(nova)
-    return nova
+    return _serialize_note(nova, 'owner')
 
 @app.put("/notes/{note_id}")
 def update_note(note_id: str, note: UserNoteSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id, UserNoteDB.user_id == current_user.id).first()
-    if db_note:
-        db_note.titulo = note.titulo
-        db_note.conteudo = note.conteudo
-        db_note.tipo = note.tipo
-        db_note.canvas_data = note.canvas_data
-        db.commit()
+    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id).first()
+    if not db_note:
+        raise HTTPException(status_code=404, detail="Nota não encontrada")
+    cards_by_id = {c.id: c for c in db.query(CardDB).all()}
+    perm = compute_permission(db_note, current_user, cards_by_id)
+    if perm is None:
+        raise HTTPException(status_code=403, detail="Sem acesso a esta nota")
+    _check_share_fields_change(note, db_note, perm)
+    db_note.titulo = note.titulo
+    db_note.conteudo = note.conteudo
+    db_note.tipo = note.tipo
+    db_note.canvas_data = note.canvas_data
+    if perm == 'owner':
+        db_note.card_id = note.card_id
+        db_note.publico = note.publico
+        db_note.compartilhado_com = [s.model_dump() for s in note.compartilhado_com]
+    db.commit()
     return {"ok": True}
 
 @app.delete("/notes/{note_id}")
 def delete_note(note_id: str, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id, UserNoteDB.user_id == current_user.id).first()
-    if db_note:
-        db.delete(db_note)
-        db.commit()
+    db_note = db.query(UserNoteDB).filter(UserNoteDB.id == note_id).first()
+    if not db_note:
+        raise HTTPException(status_code=404, detail="Nota não encontrada")
+    if db_note.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Apenas o dono pode deletar esta nota")
+    db.delete(db_note)
+    db.commit()
     return {"ok": True}
 
-class DrawingSchema(BaseModel):
-    data: str = ""
+@app.get("/drawings")
+def list_drawings(card_id: Optional[str] = None, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    cards_by_id = {c.id: c for c in db.query(CardDB).all()}
+    drawings = db.query(DrawingDB).order_by(DrawingDB.criado_em.desc()).all()
+    result = []
+    for d in drawings:
+        perm = compute_permission(d, current_user, cards_by_id)
+        if perm is None or (card_id and d.card_id != card_id):
+            continue
+        result.append(_serialize_drawing(d, perm))
+    return result
 
-@app.get("/drawing/me")
-def get_drawing(current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    d = db.query(DrawingDB).filter(DrawingDB.user_id == current_user.id).first()
-    return {"data": d.data if d else ""}
+@app.post("/drawings")
+def create_drawing(drawing: DrawingSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    novo = DrawingDB(
+        id=f"drawing-{uuid.uuid4().hex[:8]}",
+        user_id=current_user.id,
+        titulo=drawing.titulo,
+        data=drawing.data,
+        criado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        card_id=drawing.card_id,
+        publico=drawing.publico,
+        compartilhado_com=[s.model_dump() for s in drawing.compartilhado_com],
+    )
+    db.add(novo)
+    db.commit()
+    db.refresh(novo)
+    return _serialize_drawing(novo, 'owner')
 
-@app.put("/drawing/me")
-def save_drawing(body: DrawingSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
-    d = db.query(DrawingDB).filter(DrawingDB.user_id == current_user.id).first()
-    if d:
-        d.data = body.data
-    else:
-        db.add(DrawingDB(user_id=current_user.id, data=body.data))
+@app.put("/drawings/{drawing_id}")
+def update_drawing(drawing_id: str, drawing: DrawingSchema, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_drawing = db.query(DrawingDB).filter(DrawingDB.id == drawing_id).first()
+    if not db_drawing:
+        raise HTTPException(status_code=404, detail="Desenho não encontrado")
+    cards_by_id = {c.id: c for c in db.query(CardDB).all()}
+    perm = compute_permission(db_drawing, current_user, cards_by_id)
+    if perm is None:
+        raise HTTPException(status_code=403, detail="Sem acesso a este desenho")
+    _check_share_fields_change(drawing, db_drawing, perm)
+    db_drawing.titulo = drawing.titulo
+    db_drawing.data = drawing.data
+    if perm == 'owner':
+        db_drawing.card_id = drawing.card_id
+        db_drawing.publico = drawing.publico
+        db_drawing.compartilhado_com = [s.model_dump() for s in drawing.compartilhado_com]
+    db.commit()
+    return {"ok": True}
+
+@app.delete("/drawings/{drawing_id}")
+def delete_drawing(drawing_id: str, current_user: UserDB = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_drawing = db.query(DrawingDB).filter(DrawingDB.id == drawing_id).first()
+    if not db_drawing:
+        raise HTTPException(status_code=404, detail="Desenho não encontrado")
+    if db_drawing.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Apenas o dono pode deletar este desenho")
+    db.delete(db_drawing)
     db.commit()
     return {"ok": True}
 

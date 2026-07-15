@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function TextEditor({ noteId, conteudo, allNotes, onChange, onOpenNote }) {
+export default function TextEditor({ noteId, conteudo, allNotes, onChange, onOpenNote, readOnly = false }) {
   const [local, setLocal]     = useState(conteudo);
-  const [editing, setEditing] = useState(!conteudo);
+  const [editing, setEditing] = useState(!conteudo && !readOnly);
   const timer     = useRef(null);
   const areaRef   = useRef(null);
 
   useEffect(() => {
     setLocal(conteudo);
-    setEditing(!conteudo);
+    setEditing(!conteudo && !readOnly);
   }, [noteId]);
 
   const handle = (e) => {
@@ -19,6 +19,7 @@ export default function TextEditor({ noteId, conteudo, allNotes, onChange, onOpe
   };
 
   const enterEdit = () => {
+    if (readOnly) return;
     setEditing(true);
     setTimeout(() => areaRef.current?.focus(), 0);
   };
@@ -68,7 +69,7 @@ export default function TextEditor({ noteId, conteudo, allNotes, onChange, onOpe
       ) : (
         <div
           onClick={enterEdit}
-          className="flex-1 overflow-y-auto custom-scrollbar p-6 text-sm leading-relaxed text-white/90 cursor-text whitespace-pre-wrap font-mono"
+          className={`flex-1 overflow-y-auto custom-scrollbar p-6 text-sm leading-relaxed text-white/90 whitespace-pre-wrap font-mono ${readOnly ? 'cursor-default' : 'cursor-text'}`}
         >
           {renderContent(local)}
         </div>

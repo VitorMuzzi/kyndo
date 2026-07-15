@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search } from 'lucide-react';
+import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff } from 'lucide-react';
 
 import { API, authFetch } from './api.js';
 import { PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, userColor, GitHubIcon } from './constants.jsx';
@@ -29,16 +29,27 @@ export default function App() {
   const [isSyncing, setIsSyncing]       = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(false);
+  const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('kyndo_header_pinned') === 'true');
+  const [headerHeight, setHeaderHeight] = useState(0);
   const [showLeftArrow, setShowLeftArrow]   = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
   const [activeView, setActiveView] = useState('board');
   const [colOrder, setColOrder] = useState({});   // explicit per-column card order after drag
   const [showSearch, setShowSearch] = useState(false);
+  const [pendingOpenItem, setPendingOpenItem] = useState(null); // { type: 'nota'|'desenho', id }
   const boardRef = useRef(null);
   const colTitleTimers = useRef({});
   const isDragging = useRef(false);
   const syncBlockedUntil = useRef(0);
   const cardsRef = useRef({});
+
+  // Mark a card as seen (clears its "changed" badge for this user only) whenever it's opened
+  useEffect(() => {
+    const id = modal?.card?.id;
+    if (!id) return;
+    authFetch(`${API}/cards/${id}/seen`, { method: 'POST' });
+    setCards(prev => prev[id] ? { ...prev, [id]: { ...prev[id], nao_visto: false, alteracoes_nao_vistas: 0 } } : prev);
+  }, [modal?.card?.id]);
 
   // Ctrl+K / Cmd+K to open search
   useEffect(() => {
@@ -108,6 +119,22 @@ export default function App() {
 
   const toggleFullscreen = () =>
     document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+
+  useEffect(() => { localStorage.setItem('kyndo_header_pinned', headerPinned ? 'true' : 'false'); }, [headerPinned]);
+
+  // Measure header height so pinned content can offset itself correctly.
+  // Callback ref (not useRef+useEffect) because the header only mounts after
+  // login, well after App's initial mount/effects have already run.
+  const headerRef = useCallback((node) => {
+    if (!node) return;
+    const update = () => setHeaderHeight(node.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
+  const showHeader = headerVisible || headerPinned;
 
   const handleLogin = (loggedUser) => {
     localStorage.setItem('demandaflow_token', loggedUser.token);
@@ -291,6 +318,13 @@ export default function App() {
   if (currentScreen === 'admin') return <AdminPanel onBack={() => setCurrentScreen('board')} currentUsers={allUsers} refreshUsers={fetchUsers} />;
 
   const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+  const cardsArray = Object.values(cards);
+
+  const openLinkedItem = (type, id) => {
+    setActiveView(type === 'nota' ? 'notas' : 'desenho');
+    setPendingOpenItem({ type, id });
+    setModal(null);
+  };
 
   return (
     <div className="relative h-[100dvh] font-sans overflow-hidden"
@@ -315,13 +349,17 @@ export default function App() {
           onClose={() => setModal(null)}
           onSave={handleSaveCard}
           onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(() => { setModal(null); sync(); })}
+          onOpenLinkedItem={openLinkedItem}
         />
       )}
 
       {/* Header trigger zone */}
-      <div className="fixed top-0 left-0 right-0 h-4 z-[120]" onMouseEnter={() => setHeaderVisible(true)} />
+      {!headerPinned && (
+        <div className="fixed top-0 left-0 right-0 h-4 z-[120]" onMouseEnter={() => setHeaderVisible(true)} />
+      )}
       <header
-        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-white/10 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${headerVisible ? 'translate-y-0' : '-translate-y-full'}`}
+        ref={headerRef}
+        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-white/10 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${showHeader ? 'translate-y-0' : '-translate-y-full'}`}
         onMouseEnter={() => setHeaderVisible(true)}
         onMouseLeave={() => setHeaderVisible(false)}
       >
@@ -333,6 +371,9 @@ export default function App() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto justify-end relative">
+          <button onClick={() => setHeaderPinned(p => !p)} className={`hidden sm:flex items-center justify-center p-2 px-3 rounded-xl border transition-colors shadow-lg ${headerPinned ? 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-300' : 'bg-white/20 hover:bg-white/30 text-white border-white/10'}`} title={headerPinned ? 'Desafixar cabeçalho' : 'Fixar cabeçalho'}>
+            {headerPinned ? <PinOff size={18} /> : <Pin size={18} />}
+          </button>
           <button onClick={toggleFullscreen} className="hidden sm:flex items-center justify-center p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg" title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>
             {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
@@ -433,25 +474,30 @@ export default function App() {
 
       {/* Non-board views */}
       {activeView === 'cronograma' && (
-        <div className="absolute inset-0">
+        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
           <CronogramaView cards={cards} allUsers={allUsers} setModal={setModal} />
         </div>
       )}
       {activeView === 'notas' && (
-        <div className="absolute inset-0">
-          <NotasView user={user} />
+        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+          <NotasView user={user} allUsers={allUsers} cards={cardsArray}
+            openItemId={pendingOpenItem?.type === 'nota' ? pendingOpenItem.id : null}
+            onOpenItemHandled={() => setPendingOpenItem(null)} />
         </div>
       )}
       {activeView === 'desenho' && (
-        <div className="absolute inset-0">
-          <DesenhoView />
+        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+          <DesenhoView user={user} allUsers={allUsers} cards={cardsArray}
+            openItemId={pendingOpenItem?.type === 'desenho' ? pendingOpenItem.id : null}
+            onOpenItemHandled={() => setPendingOpenItem(null)} />
         </div>
       )}
 
       {/* Board view */}
       <div
         ref={boardRef}
-        className={`h-full overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden p-3 md:p-8 custom-scrollbar ${activeView !== 'board' ? 'invisible pointer-events-none absolute' : ''}`}
+        className={`h-full overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden p-3 md:p-8 custom-scrollbar transition-[padding-top] duration-300 ${activeView !== 'board' ? 'invisible pointer-events-none absolute' : ''}`}
+        style={{ paddingTop: headerPinned ? headerHeight + 12 : undefined }}
       >
         <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <div className="relative min-h-full w-full">
@@ -540,8 +586,15 @@ export default function App() {
                                         {(kp, kSnap) => (
                                           <div ref={kp.innerRef} {...kp.draggableProps} {...kp.dragHandleProps}
                                             onClick={() => setModal({ card, status: col.id })}
-                                            className={`p-4 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}
+                                            className={`relative p-4 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}
                                             style={{ ...kp.draggableProps.style, ...(kSnap.isDropAnimating && { transitionDuration: '0.001s' }) }}>
+
+                                            {card.nao_visto && (
+                                              <span className="absolute top-2 right-2 min-w-[19px] h-[19px] px-1 flex items-center justify-center bg-red-500 rounded-full ring-2 ring-white shadow-md animate-pulse z-10 text-white text-[10px] font-black leading-none"
+                                                title={`${card.alteracoes_nao_vistas} alteraç${card.alteracoes_nao_vistas === 1 ? 'ão não vista' : 'ões não vistas'}`}>
+                                                {card.alteracoes_nao_vistas > 9 ? '9+' : card.alteracoes_nao_vistas}
+                                              </span>
+                                            )}
 
                                             <div className="flex justify-between items-start">
                                               <span className={`text-xs uppercase px-2 py-0.5 rounded ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
