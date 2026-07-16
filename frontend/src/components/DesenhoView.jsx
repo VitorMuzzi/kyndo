@@ -18,17 +18,32 @@ export default function DesenhoView({ user, allUsers, cards, openItemId, onOpenI
   const [size, setSize]           = useState(5);
   const [undoStack, setUndoStack] = useState([]);
 
+  // Fetch + pick the initial active drawing in one step (see NotasView.jsx for
+  // why this can't be split into a separate "correct the selection" effect).
   useEffect(() => {
     authFetch(`${API}/drawings`)
       .then(r => r.ok ? r.json() : [])
-      .then(data => { setDrawings(data); if (data.length > 0) setActiveId(data[0].id); setLoading(false); });
+      .then(data => {
+        setDrawings(data);
+        setLoading(false);
+        if (openItemId && data.some(d => d.id === openItemId)) {
+          setActiveId(openItemId);
+          onOpenItemHandled?.();
+        } else if (data.length > 0) {
+          setActiveId(data[0].id);
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the mount-time openItemId matters here
   }, []);
 
+  // If openItemId changes while already mounted, jump to it.
   useEffect(() => {
     if (!openItemId || loading) return;
-    if (drawings.some(d => d.id === openItemId)) setActiveId(openItemId);
-    onOpenItemHandled?.();
-  }, [openItemId, loading, drawings]);
+    if (drawings.some(d => d.id === openItemId)) {
+      setActiveId(openItemId);
+      onOpenItemHandled?.();
+    }
+  }, [openItemId]);
 
   const activeDrawing = drawings.find(d => d.id === activeId) || null;
   const readOnly = activeDrawing ? activeDrawing.pode_editar === false : false;

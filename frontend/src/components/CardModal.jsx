@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
+import DrawingThumbnail from './DrawingThumbnail.jsx';
 
 export default function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete, onOpenLinkedItem }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
@@ -272,8 +273,13 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                 ))}
                 {linkedDrawings.map(d => (
                   <button key={d.id} onClick={() => onOpenLinkedItem?.('desenho', d.id)}
-                    className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
-                    <PenLine size={13} className="text-emerald-600"/> {d.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400"/>
+                    className="flex items-center gap-2 text-xs font-bold pl-1.5 pr-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
+                    {d.data ? (
+                      <DrawingThumbnail src={d.data} size={44}/>
+                    ) : (
+                      <PenLine size={13} className="text-emerald-600 shrink-0"/>
+                    )}
+                    {d.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400 shrink-0"/>
                   </button>
                 ))}
               </div>

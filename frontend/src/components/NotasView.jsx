@@ -13,17 +13,37 @@ export default function NotasView({ user, allUsers, cards, openItemId, onOpenIte
   const [saveStatus, setSaveStatus] = useState('idle');
   const saveTimer = useRef(null);
 
+  // Fetch + pick the initial active note in one step: if we were told to open a
+  // specific note (openItemId, from a "linked item" click elsewhere), honor that;
+  // otherwise fall back to the most recent one. Doing this in a single effect
+  // avoids a race with a separate "correct the selection" effect, which could
+  // otherwise fire twice (e.g. React StrictMode) and stomp the correction back
+  // to the default note.
   useEffect(() => {
     authFetch(`${API}/notes`)
       .then(r => r.ok ? r.json() : [])
-      .then(data => { setNotes(data); if (data.length > 0) setActiveId(data[0].id); setLoading(false); });
+      .then(data => {
+        setNotes(data);
+        setLoading(false);
+        if (openItemId && data.some(n => n.id === openItemId)) {
+          setActiveId(openItemId);
+          onOpenItemHandled?.();
+        } else if (data.length > 0) {
+          setActiveId(data[0].id);
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the mount-time openItemId matters here
   }, []);
 
+  // If openItemId changes while already mounted (e.g. clicking a different
+  // linked note without leaving the Notas view), jump to it.
   useEffect(() => {
     if (!openItemId || loading) return;
-    if (notes.some(n => n.id === openItemId)) setActiveId(openItemId);
-    onOpenItemHandled?.();
-  }, [openItemId, loading, notes]);
+    if (notes.some(n => n.id === openItemId)) {
+      setActiveId(openItemId);
+      onOpenItemHandled?.();
+    }
+  }, [openItemId]);
 
   const activeNote = notes.find(n => n.id === activeId) || null;
 

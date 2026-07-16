@@ -589,22 +589,23 @@ export default function App() {
                                             className={`relative p-4 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}
                                             style={{ ...kp.draggableProps.style, ...(kSnap.isDropAnimating && { transitionDuration: '0.001s' }) }}>
 
-                                            {card.nao_visto && (
-                                              <span className="absolute top-2 right-2 min-w-[19px] h-[19px] px-1 flex items-center justify-center bg-red-500 rounded-full ring-2 ring-white shadow-md animate-pulse z-10 text-white text-[10px] font-black leading-none"
-                                                title={`${card.alteracoes_nao_vistas} alteraç${card.alteracoes_nao_vistas === 1 ? 'ão não vista' : 'ões não vistas'}`}>
-                                                {card.alteracoes_nao_vistas > 9 ? '9+' : card.alteracoes_nao_vistas}
-                                              </span>
-                                            )}
-
-                                            <div className="flex justify-between items-start">
-                                              <span className={`text-xs uppercase px-2 py-0.5 rounded ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
+                                            <div className="flex justify-between items-start gap-1.5">
+                                              <span className={`text-xs uppercase px-2 py-0.5 rounded shrink-0 ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
                                                 {card.prioridade || 'Normal'}
                                               </span>
-                                              {card.prazo && (
-                                                <span className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 font-bold px-1.5 py-0.5 rounded">
-                                                  <Calendar size={12} /> {formatarData(card.prazo)}
-                                                </span>
-                                              )}
+                                              <div className="flex items-center gap-1.5 shrink-0">
+                                                {card.prazo && (
+                                                  <span className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 font-bold px-1.5 py-0.5 rounded">
+                                                    <Calendar size={12} /> {formatarData(card.prazo)}
+                                                  </span>
+                                                )}
+                                                {card.nao_visto && (
+                                                  <span className="flex items-center justify-center min-w-[19px] h-[19px] px-1 bg-red-500 rounded-full ring-2 ring-white shadow-md animate-pulse text-white text-[10px] font-black leading-none"
+                                                    title={`${card.alteracoes_nao_vistas} alteraç${card.alteracoes_nao_vistas === 1 ? 'ão não vista' : 'ões não vistas'}`}>
+                                                    {card.alteracoes_nao_vistas > 9 ? '9+' : card.alteracoes_nao_vistas}
+                                                  </span>
+                                                )}
+                                              </div>
                                             </div>
 
                                             <p className="text-base font-bold text-gray-800 leading-tight">{card.titulo}</p>
