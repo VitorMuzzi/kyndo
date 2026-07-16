@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink } from 'lucide-react';
+import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
@@ -267,19 +267,36 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
               <div className="flex flex-wrap gap-2">
                 {linkedNotes.map(n => (
                   <button key={n.id} onClick={() => onOpenLinkedItem?.('nota', n.id)}
-                    className="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
-                    <FileText size={13} className="text-emerald-600"/> {n.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400"/>
+                    className="flex flex-col gap-1.5 p-2 w-36 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
+                    <div className="w-32 h-32 rounded bg-white border border-gray-200 p-2 overflow-hidden">
+                      {n.tipo === 'canvas' ? (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Network size={36} className="text-blue-400"/>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-gray-500 leading-snug line-clamp-6 whitespace-pre-wrap break-words text-left">
+                          {n.conteudo || 'Nota vazia'}
+                        </p>
+                      )}
+                    </div>
+                    <span className="flex items-center gap-1 text-xs font-bold truncate">
+                      <FileText size={12} className="text-emerald-600 shrink-0"/> <span className="truncate">{n.titulo || 'Sem título'}</span> <ExternalLink size={11} className="text-gray-400 shrink-0"/>
+                    </span>
                   </button>
                 ))}
                 {linkedDrawings.map(d => (
                   <button key={d.id} onClick={() => onOpenLinkedItem?.('desenho', d.id)}
-                    className="flex items-center gap-2 text-xs font-bold pl-1.5 pr-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
+                    className="flex flex-col gap-1.5 p-2 w-36 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-gray-700 transition-colors">
                     {d.data ? (
-                      <DrawingThumbnail src={d.data} size={44}/>
+                      <DrawingThumbnail src={d.data} size={128}/>
                     ) : (
-                      <PenLine size={13} className="text-emerald-600 shrink-0"/>
+                      <div className="w-32 h-32 flex items-center justify-center rounded" style={{ background: '#0f172a' }}>
+                        <PenLine size={20} className="text-emerald-400"/>
+                      </div>
                     )}
-                    {d.titulo || 'Sem título'} <ExternalLink size={11} className="text-gray-400 shrink-0"/>
+                    <span className="flex items-center gap-1 text-xs font-bold truncate">
+                      <span className="truncate">{d.titulo || 'Sem título'}</span> <ExternalLink size={11} className="text-gray-400 shrink-0"/>
+                    </span>
                   </button>
                 ))}
               </div>
