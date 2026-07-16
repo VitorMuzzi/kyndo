@@ -51,6 +51,33 @@ export default function App() {
     setCards(prev => prev[id] ? { ...prev, [id]: { ...prev[id], nao_visto: false, alteracoes_nao_vistas: 0 } } : prev);
   }, [modal?.card?.id]);
 
+  // Make the browser's back/forward buttons navigate between views (Quadro/Cronograma/
+  // Notas/Desenho) and open/closed cards instead of leaving the site entirely — by
+  // default none of this touches browser history, so "voltar" just exits to whatever
+  // page was open before the site. isPopStateNav guards against feeding our own
+  // pushState calls back into another pushState when restoring from popstate.
+  const isPopStateNav = useRef(false);
+  useEffect(() => {
+    if (currentScreen !== 'board') return;
+    history.replaceState({ view: activeView, cardId: null }, '');
+    const onPopState = (e) => {
+      isPopStateNav.current = true;
+      const state = e.state || {};
+      setActiveView(state.view || 'board');
+      const card = state.cardId ? cardsRef.current[state.cardId] : null;
+      setModal(card ? { card, status: card.status } : null);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [currentScreen]);
+
+  const modalNavKey = modal ? (modal.card?.id ?? 'new') : null;
+  useEffect(() => {
+    if (currentScreen !== 'board') return;
+    if (isPopStateNav.current) { isPopStateNav.current = false; return; }
+    history.pushState({ view: activeView, cardId: modal?.card?.id ?? null }, '');
+  }, [activeView, modalNavKey, currentScreen]);
+
   // Ctrl+K / Cmd+K to open search
   useEffect(() => {
     const handler = (e) => {
