@@ -3,7 +3,7 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff } from 'lucide-react';
 
 import { API, authFetch } from './api.js';
-import { PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, userColor, GitHubIcon } from './constants.jsx';
+import { PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon } from './constants.jsx';
 
 import LoginScreen from './components/LoginScreen.jsx';
 import ChangePasswordScreen from './components/ChangePasswordScreen.jsx';
@@ -98,8 +98,8 @@ export default function App() {
 
   // Restore session
   useEffect(() => {
-    const savedUser = localStorage.getItem('demandaflow_user');
-    const token     = localStorage.getItem('demandaflow_token');
+    const savedUser = sessionStorage.getItem('demandaflow_user');
+    const token     = sessionStorage.getItem('demandaflow_token');
     if (savedUser && token) { setUser(JSON.parse(savedUser)); setCurrentScreen('board'); }
     else handleLogout();
   }, []);
@@ -164,12 +164,12 @@ export default function App() {
   const showHeader = headerVisible || headerPinned;
 
   const handleLogin = (loggedUser) => {
-    localStorage.setItem('demandaflow_token', loggedUser.token);
+    sessionStorage.setItem('demandaflow_token', loggedUser.token);
     if (loggedUser.senha_temporaria) {
       setUser(loggedUser); setCurrentScreen('change_password');
     } else {
       setUser(loggedUser);
-      localStorage.setItem('demandaflow_user', JSON.stringify(loggedUser));
+      sessionStorage.setItem('demandaflow_user', JSON.stringify(loggedUser));
       setCurrentScreen('board');
     }
   };
@@ -177,14 +177,14 @@ export default function App() {
   const handlePasswordChanged = () => {
     const updated = { ...user, senha_temporaria: false };
     setUser(updated);
-    localStorage.setItem('demandaflow_user', JSON.stringify(updated));
+    sessionStorage.setItem('demandaflow_user', JSON.stringify(updated));
     setCurrentScreen('board');
   };
 
   const handleLogout = () => {
     setUser(null);
-    localStorage.removeItem('demandaflow_user');
-    localStorage.removeItem('demandaflow_token');
+    sessionStorage.removeItem('demandaflow_user');
+    sessionStorage.removeItem('demandaflow_token');
     setCurrentScreen('login');
   };
 
@@ -246,7 +246,9 @@ export default function App() {
     isDragging.current = false;
     syncBlockedUntil.current = Date.now() + 2000; // block sync for 2s after drag
     const { destination, source, draggableId, type } = result;
-    if (!destination || (user.role !== 'admin' && user.role !== 'superadmin')) return;
+    if (!destination) return;
+    if (type === 'column' && !hasPermission(user, 'gerenciar_colunas')) return;
+    if (type === 'card' && !hasPermission(user, 'reordenar_cards')) return;
 
     if (type === 'column') {
       const newCols = Array.from(cols);
@@ -342,15 +344,24 @@ export default function App() {
 
   if (!user || currentScreen === 'login') return <LoginScreen onLogin={handleLogin} />;
   if (currentScreen === 'change_password') return <ChangePasswordScreen user={user} onPasswordChanged={handlePasswordChanged} />;
-  if (currentScreen === 'admin') return <AdminPanel onBack={() => setCurrentScreen('board')} currentUsers={allUsers} refreshUsers={fetchUsers} />;
+  if (currentScreen === 'admin') return <AdminPanel user={user} onBack={() => setCurrentScreen('board')} currentUsers={allUsers} refreshUsers={fetchUsers} />;
 
-  const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+  const canManageColumns = hasPermission(user, 'gerenciar_colunas');
+  const canReorderCards = hasPermission(user, 'reordenar_cards');
+  const canCreateCardAnywhere = hasPermission(user, 'criar_card_coluna_privada');
+  const canAccessAdminPanel = ['gerenciar_usuarios', 'excluir_usuarios', 'gerenciar_cargos', 'ver_log_auditoria']
+    .some(key => hasPermission(user, key));
   const cardsArray = Object.values(cards);
 
   const openLinkedItem = (type, id) => {
     setActiveView(type === 'nota' ? 'notas' : 'desenho');
     setPendingOpenItem({ type, id });
     setModal(null);
+  };
+
+  const onNavigateToCard = (cardId) => {
+    const card = cardsRef.current[cardId];
+    if (card) setModal({ card, status: card.status });
   };
 
   return (
@@ -373,10 +384,12 @@ export default function App() {
           col={cols.find(c => c.id === modal.status)}
           user={user}
           allUsers={allUsers}
+          allCards={cardsArray}
           onClose={() => setModal(null)}
           onSave={handleSaveCard}
           onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(() => { setModal(null); sync(); })}
           onOpenLinkedItem={openLinkedItem}
+          onNavigateToCard={onNavigateToCard}
         />
       )}
 
@@ -477,9 +490,9 @@ export default function App() {
               <User size={16} />
               <span className="font-bold text-xs md:text-sm truncate max-w-[80px] md:max-w-none">{user.nome}</span>
             </div>
-            {user.role === 'superadmin' && (
+            {canAccessAdminPanel && (
               <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }} className="text-[10px] md:text-xs bg-orange-500 hover:bg-orange-600 px-2 md:px-3 py-1 rounded font-bold uppercase transition-colors shadow-md">
-                Admin
+                Config
               </button>
             )}
             <button onClick={handleLogout} className="text-red-300 hover:text-red-100 p-1 ml-1 md:ml-2 transition-colors border-l border-white/20 pl-2 md:pl-4" title="Sair">
@@ -532,7 +545,7 @@ export default function App() {
               {(provided) => (
                 <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 items-start w-full">
                   {cols.map((col, index) => (
-                    <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={!isAdmin}>
+                    <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={!canManageColumns}>
                       {(p, snapshot) => (
                         <div ref={p.innerRef} {...p.draggableProps}
                           className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl min-h-[120px] max-h-[calc(100dvh-4rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
@@ -542,13 +555,13 @@ export default function App() {
                             <div className="flex items-center gap-2">
                               {col.publica ? <Unlock size={12} className="text-green-600" /> : <Lock size={12} className="text-gray-500" />}
                               <input
-                                disabled={!isAdmin}
+                                disabled={!canManageColumns}
                                 value={col.titulo}
                                 onChange={e => handleColTitleChange(col, e.target.value)}
                                 className="bg-transparent font-bold text-gray-800 text-sm w-full outline-none uppercase tracking-widest"
                               />
                             </div>
-                            {isAdmin && (
+                            {canManageColumns && (
                               <button onClick={() => setActiveMenu(activeMenu === col.id ? null : col.id)} className="p-1 hover:bg-black/5 rounded transition-colors">
                                 <MoreHorizontal size={18} />
                               </button>
@@ -609,7 +622,7 @@ export default function App() {
                                     const stylePrioridade = PRIORIDADE_CARD_STYLE[card.prioridade || 'Normal'];
 
                                     return (
-                                      <Draggable key={card.id} draggableId={card.id} index={ki} isDragDisabled={!isAdmin}>
+                                      <Draggable key={card.id} draggableId={card.id} index={ki} isDragDisabled={!canReorderCards}>
                                         {(kp, kSnap) => (
                                           <div ref={kp.innerRef} {...kp.draggableProps} {...kp.dragHandleProps}
                                             onClick={() => setModal({ card, status: col.id })}
@@ -680,7 +693,7 @@ export default function App() {
                             )}
                           </Droppable>
 
-                          {(isAdmin || col.publica) && (
+                          {(canCreateCardAnywhere || col.publica) && (
                             <button onClick={() => setModal({ status: col.id })} className="m-2 mt-auto shrink-0 p-2 text-xs font-bold text-gray-500 hover:bg-black/5 rounded-xl flex items-center gap-2 transition-colors">
                               <Plus size={16} /> Sugerir demanda
                             </button>
@@ -694,7 +707,7 @@ export default function App() {
               )}
             </Droppable>
 
-            {isAdmin && (
+            {canManageColumns && (
               <button
                 onClick={() => authFetch(`${API}/columns`, {
                   method: 'POST',

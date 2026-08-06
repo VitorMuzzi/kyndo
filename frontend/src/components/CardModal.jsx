@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network } from 'lucide-react';
-import { PRIORIDADES_BADGE, userColor, formatarData, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
+import { PRIORIDADES_BADGE, userColor, formatarData, hasPermission, autorRoleChips, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
+import SuggestionsSection from './SuggestionsSection.jsx';
 
-export default function CardModal({ card, col, user, allUsers, onClose, onSave, onDelete, onOpenLinkedItem }) {
+export default function CardModal({ card, col, user, allUsers, allCards, onClose, onSave, onDelete, onOpenLinkedItem, onNavigateToCard }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
   const [desc, setDesc] = useState(card?.descricao || '');
   const [checklist, setChecklist] = useState(card?.checklist || []);
@@ -35,15 +36,23 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
     authFetch(`${API}/drawings?card_id=${card.id}`).then(r => r.ok ? r.json() : []).then(setLinkedDrawings);
   }, [card?.id]);
 
-  const isAdmin = user.role === 'admin' || user.role === 'superadmin';
-  const isSuperAdmin = user.role === 'superadmin';
+  const canEditCard = hasPermission(user, 'editar_card');
+  const canDeleteCard = hasPermission(user, 'excluir_card');
+  const canEditPrioridade = hasPermission(user, 'editar_prioridade');
+  const canEditPrazo = hasPermission(user, 'editar_prazo');
+  const canManageEtapas = hasPermission(user, 'gerenciar_etapas');
+  const canCompleteEtapas = canManageEtapas || hasPermission(user, 'concluir_etapas');
+  const canManageResponsaveis = hasPermission(user, 'gerenciar_responsaveis');
+  const canDecideSugestoes = hasPermission(user, 'decidir_sugestoes');
   const isAuthor = card?.autor === user.nome;
 
-  const podeEditarDescricao = isAdmin || (col?.publica && (isAuthor || !card?.id));
-  const podeDeletar = card?.id && (isAdmin || (isAuthor && col?.id === 'col-1'));
-  const mostrarPrioridade = isAdmin || prioridade !== 'Normal' || col?.id !== 'col-1';
-  const mostrarPrazo = isAdmin || prazo;
-  const mostrarEtapas = isAdmin || checklist.length > 0;
+  // Preserved exactly as before RBAC: authors keep self-service editing rights
+  // in public columns / on their own new card, on top of whatever their cargos grant.
+  const podeEditarDescricao = canEditCard || (col?.publica && (isAuthor || !card?.id));
+  const podeDeletar = card?.id && (canDeleteCard || (isAuthor && col?.id === 'col-1'));
+  const mostrarPrioridade = canEditPrioridade || prioridade !== 'Normal' || col?.id !== 'col-1';
+  const mostrarPrazo = canEditPrazo || prazo;
+  const mostrarEtapas = canCompleteEtapas || checklist.length > 0;
 
   const normalizeGithubUrl = (url) => {
     const trimmed = url.trim();
@@ -62,8 +71,9 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
     }
   };
 
-  const addSubtarefa = () => { if (!novaSubtarefa.trim() || !isAdmin) return; setChecklist([...checklist, { id: `sub-${Date.now()}`, texto: novaSubtarefa, concluido: false, criador: user.nome }]); setNovaSubtarefa(''); };
-  const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: `msg-${Date.now()}`, autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
+  const novoId = (prefixo) => `${prefixo}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const addSubtarefa = () => { if (!novaSubtarefa.trim() || !canManageEtapas) return; setChecklist([...checklist, { id: novoId('sub'), texto: novaSubtarefa, concluido: false, criador: user.nome }]); setNovaSubtarefa(''); };
+  const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: novoId('msg'), autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
 
   const percentual = checklist.length > 0 ? Math.round(
     checklist.reduce((acc, item) => {
@@ -82,7 +92,7 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
               {mostrarPrioridade && (
                 <div className="flex items-center gap-1 md:gap-2 shrink-0 ml-2 relative">
                   <Tag size={14} className="text-gray-400 hidden md:block"/>
-                  {isAdmin ? (
+                  {canEditPrioridade ? (
                     <div className="relative">
                       <div onClick={() => setPrioridadeAberto(!prioridadeAberto)} className={`flex items-center gap-1 text-[10px] md:text-xs font-bold uppercase rounded-lg px-2 py-1 outline-none cursor-pointer transition-colors ${PRIORIDADES_BADGE[prioridade]}`}>
                         {prioridade} <ChevronDown size={12}/>
@@ -113,12 +123,12 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                 {responsaveis.map(nome => (
                   <span key={nome} className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>
                     {nome}
-                    {isSuperAdmin && responsaveis.length > 1 && (
+                    {canManageResponsaveis && responsaveis.length > 1 && (
                       <button onClick={e => { e.stopPropagation(); setResponsaveis(responsaveis.filter(r => r !== nome)); }} className="hover:text-red-600 leading-none">×</button>
                     )}
                   </span>
                 ))}
-                {isSuperAdmin && (
+                {canManageResponsaveis && (
                   <select value="" onChange={e => { if (e.target.value && !responsaveis.includes(e.target.value)) setResponsaveis([...responsaveis, e.target.value]); }} className="text-[10px] font-bold border border-dashed border-gray-300 rounded-full px-1.5 py-0.5 outline-none bg-transparent text-gray-500 cursor-pointer">
                     <option value="">+ add</option>
                     {(allUsers || []).filter(u => !responsaveis.includes(u.nome)).map(u => <option key={u.id} value={u.nome}>{u.nome}</option>)}
@@ -129,7 +139,7 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
               {mostrarPrazo && (
                 <div className="flex items-center gap-1 bg-white border border-gray-200 px-2 py-1 rounded text-gray-600">
                   <Calendar size={12} className="text-orange-500"/>
-                  {isAdmin ? (
+                  {canEditPrazo ? (
                     <input type="date" value={prazo} onChange={e => setPrazo(e.target.value)} className="bg-transparent outline-none cursor-pointer text-gray-800"/>
                   ) : (
                     <span className="font-bold text-gray-800">{formatarData(prazo)}</span>
@@ -193,33 +203,44 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                     const subetapas = item.subetapas || [];
                     const isExpanded = expandedItemId === item.id;
                     return (
-                      <div key={item.id} className="mb-1">
+                      <div key={item.id} id={`etapa-${item.id}`} className="mb-1">
                         <div className="flex items-center gap-2 group/item">
-                          <button disabled={!isAdmin} onClick={() => { const nowDone = !item.concluido; setChecklist(checklist.map(i => i.id === item.id ? { ...i, concluido: nowDone, concluidoPor: nowDone ? user.nome : null, subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true, concluidoPor: user.nome})) : (i.subetapas||[]) } : i)); }} className={`${!isAdmin ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}>
+                          <button disabled={!canCompleteEtapas} onClick={() => { const nowDone = !item.concluido; setChecklist(checklist.map(i => i.id === item.id ? { ...i, concluido: nowDone, concluidoPor: nowDone ? user.nome : null, subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true, concluidoPor: user.nome})) : (i.subetapas||[]) } : i)); }} className={`${!canCompleteEtapas ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}>
                             {item.concluido ? <CheckCircle2 size={16} className="text-emerald-500"/> : <Circle size={16} className="text-gray-300"/>}
                           </button>
-                          {isAdmin && editingItemId === item.id ? (
+                          {canManageEtapas && editingItemId === item.id ? (
                             <input value={editingItemText} onChange={e => setEditingItemText(e.target.value)} onBlur={() => { if (editingItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, texto: editingItemText.trim()} : i)); setEditingItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingItemId(null); }} className="flex-1 min-w-0 text-sm border-b-2 border-emerald-400 outline-none bg-transparent text-gray-700 py-0.5" autoFocus/>
                           ) : (
-                            <span className={`flex-1 min-w-0 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
+                            <span className={`flex-1 min-w-0 text-sm ${item.concluido ? 'text-gray-400 line-through' : 'text-gray-700'} ${canManageEtapas ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (canManageEtapas) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
                           <div className="flex items-center gap-1 shrink-0">
                             {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
                               ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
                               : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}{item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
-                            {isAdmin && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
-                            <button onClick={() => { setExpandedItemId(isExpanded ? null : item.id); setNovaSubetapa(''); }} className="p-0.5 text-gray-400 hover:text-emerald-500 transition-colors">
+                            {canManageEtapas && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
+                            <button onClick={() => {
+                              const abrindo = !isExpanded;
+                              setExpandedItemId(abrindo ? item.id : null);
+                              setNovaSubetapa('');
+                              if (abrindo && item.notas_nao_vista && card?.id) {
+                                authFetch(`${API}/cards/${card.id}/items/${item.id}/seen`, { method: 'POST' });
+                                setChecklist(cl => cl.map(i => i.id === item.id ? { ...i, notas_nao_vista: false } : i));
+                              }
+                            }} className="relative p-0.5 text-gray-400 hover:text-emerald-500 transition-colors">
+                              {item.notas_nao_vista && !isExpanded && (
+                                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full ring-1 ring-white animate-pulse" title="Nova observação nesta etapa"/>
+                              )}
                               {isExpanded ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
                             </button>
                           </div>
                         </div>
                         {isExpanded && (
                           <div className="ml-7 mt-1 mb-2 pl-3 border-l-2 border-emerald-300 space-y-2">
-                            <textarea value={item.notas || ''} onChange={e => setChecklist(checklist.map(i => i.id === item.id ? {...i, notas: e.target.value} : i))} disabled={!isAdmin} placeholder={isAdmin ? 'Observações...' : 'Sem observações.'} className="w-full h-20 p-2 bg-gray-50 rounded-lg border border-gray-200 outline-none focus:bg-white text-sm resize-none"/>
-                            {isAdmin && (
+                            <textarea value={item.notas || ''} onChange={e => setChecklist(checklist.map(i => i.id === item.id ? {...i, notas: e.target.value} : i))} disabled={!canManageEtapas} placeholder={canManageEtapas ? 'Observações...' : 'Sem observações.'} className="w-full h-20 p-2 bg-gray-50 rounded-lg border border-gray-200 outline-none focus:bg-white text-sm resize-none"/>
+                            {canManageEtapas && (
                               <div className="flex gap-2">
-                                <input value={novaSubetapa} onChange={e => setNovaSubetapa(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novaSubetapa.trim()) { setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); } }} className="flex-1 p-1.5 border rounded text-xs outline-none focus:border-emerald-400" placeholder="Adicionar sub-etapa..."/>
-                                <button onClick={() => { if (!novaSubetapa.trim()) return; setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id:`sub-${Date.now()}`, texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); }} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold">Add</button>
+                                <input value={novaSubetapa} onChange={e => setNovaSubetapa(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novaSubetapa.trim()) { setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id: novoId('sub'), texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); } }} className="flex-1 p-1.5 border rounded text-xs outline-none focus:border-emerald-400" placeholder="Adicionar sub-etapa..."/>
+                                <button onClick={() => { if (!novaSubetapa.trim()) return; setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: [...(i.subetapas||[]), {id: novoId('sub'), texto: novaSubetapa.trim(), concluido: false, criador: user.nome}]} : i)); setNovaSubetapa(''); }} className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-bold">Add</button>
                               </div>
                             )}
                           </div>
@@ -228,19 +249,19 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                           <div className="ml-7 pl-3 mt-1 border-l-2 border-gray-200 space-y-1">
                             {subetapas.map(sub => (
                               <div key={sub.id} className="flex items-center gap-2 group/sub">
-                                <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido, concluidoPor: !s.concluido ? user.nome : null} : s)} : i))} className="shrink-0 cursor-pointer hover:scale-110 transition-transform">
+                                <button disabled={!canCompleteEtapas} onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, concluido: !s.concluido, concluidoPor: !s.concluido ? user.nome : null} : s)} : i))} className={`shrink-0 ${!canCompleteEtapas ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'}`}>
                                   {sub.concluido ? <CheckCircle2 size={16} className="text-emerald-500"/> : <Circle size={16} className="text-gray-300"/>}
                                 </button>
-                                {isAdmin && editingSubItemId === sub.id ? (
+                                {canManageEtapas && editingSubItemId === sub.id ? (
                                   <input value={editingSubItemText} onChange={e => setEditingSubItemText(e.target.value)} onBlur={() => { if (editingSubItemText.trim()) setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).map(s => s.id === sub.id ? {...s, texto: editingSubItemText.trim()} : s)} : i)); setEditingSubItemId(null); }} onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingSubItemId(null); }} className="flex-1 min-w-0 text-sm border-b border-emerald-400 outline-none bg-transparent py-0.5" autoFocus/>
                                 ) : (
-                                  <span className={`flex-1 min-w-0 text-sm ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${isAdmin ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (isAdmin) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
+                                  <span className={`flex-1 min-w-0 text-sm ${sub.concluido ? 'text-gray-400 line-through' : 'text-gray-600'} ${canManageEtapas ? 'cursor-pointer hover:text-emerald-600' : ''}`} onClick={() => { if (canManageEtapas) { setEditingSubItemId(sub.id); setEditingSubItemText(sub.texto); } }}>{sub.texto}</span>
                                 )}
                                 <div className="flex items-center gap-1 shrink-0">
                                   {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
                                     ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
                                     : <>{sub.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}{sub.concluido && sub.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
-                                  {isAdmin && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
+                                  {canManageEtapas && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-600 transition-all"><X size={14}/></button>}
                                 </div>
                               </div>
                             ))}
@@ -250,7 +271,7 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
                     );
                   })}
                 </div>
-                {isAdmin && (
+                {canManageEtapas && (
                   <div className="flex flex-row items-center gap-2 pt-2 w-full">
                     <input value={novaSubtarefa} onChange={e => setNovaSubtarefa(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSubtarefa()} className="flex-grow min-w-0 p-2 border rounded-lg text-sm outline-none focus:border-emerald-400" placeholder="Adicionar etapa..."/>
                     <button onClick={addSubtarefa} className="shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-md">Add</button>
@@ -303,20 +324,43 @@ export default function CardModal({ card, col, user, allUsers, onClose, onSave, 
             </div>
           )}
 
+          {card?.id && (
+            <>
+              <SuggestionsSection
+                cardId={card.id}
+                checklist={checklist}
+                allCards={allCards}
+                allUsers={allUsers}
+                user={user}
+                canDecide={canDecideSugestoes}
+                onNavigateToCard={onNavigateToCard}
+                onNavigateToEtapa={(itemId) => {
+                  setExpandedItemId(itemId);
+                  setTimeout(() => document.getElementById(`etapa-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+                }}
+              />
+              <hr className="border-gray-200"/>
+            </>
+          )}
+
           <div className="space-y-4">
             <div className="flex items-center gap-2 text-gray-700 font-bold text-sm"><MessageSquare size={16}/> Comentários</div>
             <div className="space-y-3">
               {comentarios.map(msg => {
-                const autorNoBanco = allUsers.find(u => u.nome === msg.autor);
-                const isAdminComment = autorNoBanco?.role === 'admin' || autorNoBanco?.role === 'superadmin';
+                const roleChips = autorRoleChips(msg.autor, allUsers);
                 const isAuthorComment = msg.autor === (card?.autor || user.nome);
-                let boxClass = 'bg-gray-50 border-gray-100'; let badge = null;
-                if (isAdminComment) { boxClass = 'bg-orange-50 border-orange-100'; badge = <span className="ml-2 text-[9px] bg-orange-200 text-orange-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>; }
-                else if (isAuthorComment) { boxClass = 'bg-emerald-50 border-emerald-100'; badge = <span className="ml-2 text-[9px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Solicitante</span>; }
+                let boxClass = 'bg-gray-50 border-gray-100';
+                if (roleChips) boxClass = 'bg-orange-50 border-orange-100';
+                else if (isAuthorComment) boxClass = 'bg-emerald-50 border-emerald-100';
                 return (
                   <div key={msg.id} className={`p-3 rounded-xl border ${boxClass}`}>
                     <div className="flex justify-between items-center mb-1">
-                      <div className="flex items-center"><span className="text-xs font-bold text-gray-800">{msg.autor}</span>{badge}</div>
+                      <div className="flex items-center flex-wrap gap-1">
+                        <span className="text-xs font-bold text-gray-800">{msg.autor}</span>
+                        {roleChips || (isAuthorComment && (
+                          <span className="text-[9px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Solicitante</span>
+                        ))}
+                      </div>
                       <span className="text-[10px] text-gray-400 font-semibold">{msg.data}</span>
                     </div>
                     <p className="text-sm text-gray-700">{msg.texto}</p>

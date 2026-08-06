@@ -133,7 +133,7 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
     const mv = (ev) => {
       const dx = (ev.clientX - startX) / zoom, dy = (ev.clientY - startY) / zoom;
       const upd = {};
-      if (dir === 'e' || dir === 'se') upd.w = Math.round(Math.max(80, Math.min(520, startW + dx)));
+      if (dir === 'e' || dir === 'se') upd.w = Math.round(Math.max(140, Math.min(520, startW + dx)));
       if (dir === 's' || dir === 'se') upd.h = Math.round(Math.max(36, Math.min(520, startH + dy)));
       setNodes(prev => { const nxt = prev.map(n => n.id === node.id ? { ...n, ...upd } : n); nodesRef.current = nxt; return nxt; });
     };
@@ -306,10 +306,16 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
             const isConn = connecting === node.id;
             const isEditing = editingId === node.id;
             const nodeW = node.w, nodeH = node.h;
-            const nodeFontSize = Math.max(10, Math.min(32, Math.round(13 * (nodeW || 120) / 120)));
+            // Fixed, not scaled by size: resizing the balloon only changes how the text wraps, so
+            // it's never a choice between "readable" and "fits the box" — the box is what adapts
+            // (width floors at 140px, height has no cap — see below), never the font.
+            const nodeFontSize = 13;
             return (
               <div key={node.id}
-                style={{ position: 'absolute', left: node.x, top: node.y, minWidth: nodeW || 80, maxWidth: nodeW || 320, height: nodeH || undefined, minHeight: 36, overflow: nodeH ? 'hidden' : 'visible', backgroundColor: c.bg, border: `2px solid ${isSel ? '#60a5fa' : isConn ? '#10b981' : c.border}`, borderRadius: 12, padding: '8px 12px', boxShadow: isSel ? '0 0 0 3px rgba(96,165,250,0.28), 0 4px 14px rgba(0,0,0,0.22)' : '0 2px 8px rgba(0,0,0,0.18)', cursor: connecting ? 'crosshair' : 'grab', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transition: 'border-color 0.1s, box-shadow 0.1s', boxSizing: 'border-box' }}
+                // nodeH is a floor (minHeight), never a hard cap: a manually-shrunk height must
+                // never be able to force text out of view. Letting the box grow past nodeH when
+                // content needs more room means it never has to clip or overflow to fit.
+                style={{ position: 'absolute', left: node.x, top: node.y, minWidth: nodeW || 140, maxWidth: nodeW || 320, minHeight: nodeH || 36, backgroundColor: c.bg, border: `2px solid ${isSel ? '#60a5fa' : isConn ? '#10b981' : c.border}`, borderRadius: 12, padding: '8px 12px', boxShadow: isSel ? '0 0 0 3px rgba(96,165,250,0.28), 0 4px 14px rgba(0,0,0,0.22)' : '0 2px 8px rgba(0,0,0,0.18)', cursor: connecting ? 'crosshair' : 'grab', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transition: 'border-color 0.1s, box-shadow 0.1s', boxSizing: 'border-box' }}
                 onMouseDown={e => onNodeDown(e, node)} onDoubleClick={e => onNodeDbl(e, node)}>
                 {node.linkedNoteId && <span style={{ fontSize: 10, marginBottom: 2, opacity: 0.65 }}>🔗</span>}
                 {isEditing ? (
@@ -325,7 +331,10 @@ export default function CanvasEditor({ noteId, data, allNotes, onChange, onOpenN
                   </span>
                 )}
                 {!readOnly && isSel && !isEditing && !connecting && (
-                  <div style={{ position: 'absolute', right: -20, top: '50%', transform: 'translateY(-50%)', width: 20, height: 20, borderRadius: '50%', background: '#10b981', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 900, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 10 }}
+                  // right: -32 (was -20) so this doesn't overlap the "Largura" resize handle
+                  // (right: -5, width 9 → spans to right+5) — they used to share a few px and
+                  // the arrow's z-index:10 always won, silently swallowing resize-handle clicks.
+                  <div style={{ position: 'absolute', right: -32, top: '50%', transform: 'translateY(-50%)', width: 20, height: 20, borderRadius: '50%', background: '#10b981', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 900, boxShadow: '0 2px 6px rgba(0,0,0,0.3)', zIndex: 10 }}
                     onMouseDown={e => { e.stopPropagation(); setConnecting(node.id); }} title="Conectar a outro balão">→</div>
                 )}
                 {!readOnly && isSel && !isEditing && (<>

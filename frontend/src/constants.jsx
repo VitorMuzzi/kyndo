@@ -47,6 +47,19 @@ export const DRAW_H = 1400;
 export const DRAW_COLORS = ['#ffffff','#f87171','#fb923c','#facc15','#4ade80','#60a5fa','#a78bfa','#f472b6','#94a3b8','#000000'];
 export const DRAW_SIZES  = [2, 5, 10, 22];
 
+export const hasPermission = (user, key) => (user?.permissions || []).includes(key);
+
+// Cargos (roles) a given user holds, excluding the baseline "Usuário" cargo —
+// used to render Discord-style chips next to comment/suggestion authors.
+export function autorRoleChips(autorNome, allUsers) {
+  const autor = (allUsers || []).find(u => u.nome === autorNome);
+  const roles = (autor?.roles || []).filter(r => r.nome !== 'Usuário');
+  if (roles.length === 0) return null;
+  return roles.map(r => (
+    <span key={r.id} className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider text-white" style={{ backgroundColor: r.cor }}>{r.nome}</span>
+  ));
+}
+
 export function formatarData(dataISO) {
   if (!dataISO) return '';
   const [ano, mes, dia] = dataISO.split('-');
@@ -62,6 +75,33 @@ export function renderTextWithLinks(text) {
       return <a key={i} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{part}</a>;
     }
     return part;
+  });
+}
+
+const MENTION_TOKEN_RE = /(@\[[^\]]+\]\((?:card|etapa):[\w-]+\))/g;
+const MENTION_PARSE_RE = /^@\[([^\]]+)\]\((card|etapa):([\w-]+)\)$/;
+
+export function mentionToken(tipo, id, label) {
+  return `@[${label}](${tipo}:${id})`;
+}
+
+export function renderSuggestionText(text, { onCardClick, onEtapaClick } = {}) {
+  if (!text) return null;
+  const parts = text.split(MENTION_TOKEN_RE);
+  return parts.map((part, i) => {
+    const m = part.match(MENTION_PARSE_RE);
+    if (!m) return part;
+    const [, label, tipo, id] = m;
+    return (
+      <button
+        key={i}
+        type="button"
+        onClick={() => (tipo === 'card' ? onCardClick?.(id) : onEtapaClick?.(id))}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded bg-emerald-100 text-emerald-700 text-xs font-bold hover:bg-emerald-200 align-baseline"
+      >
+        {label}
+      </button>
+    );
   });
 }
 

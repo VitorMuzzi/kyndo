@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { X, Plus, Archive, Palette, Settings, CheckCircle2, Circle, Lock, Unlock } from 'lucide-react';
+import { hasPermission } from '../constants.jsx';
 
 export default function ListActionsMenu({ col, user, onClose, onAddCard, onArchiveList, onUpdateCol }) {
   const menuRef = useRef();
@@ -10,7 +11,7 @@ export default function ListActionsMenu({ col, user, onClose, onAddCard, onArchi
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  if (user.role !== 'admin' && user.role !== 'superadmin') return null;
+  if (!hasPermission(user, 'gerenciar_colunas')) return null;
 
   return (
     <div ref={menuRef} className="absolute top-12 right-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-200 z-[100] p-3 space-y-1 animate-in fade-in zoom-in-95">

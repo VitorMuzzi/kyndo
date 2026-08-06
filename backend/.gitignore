@@ -12,3 +12,6 @@ demandas.db
 
 # Variáveis de Ambiente e Segredos
 .env
+
+# Logs
+*.log
