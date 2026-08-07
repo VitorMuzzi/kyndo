@@ -30,7 +30,7 @@ def _put_card(client, token, card, **overrides):
 
 
 def _create_suggestion(client, token, card_id, **overrides):
-    payload = {"texto": "Sugestão de teste", **overrides}
+    payload = {"texto": "Sugestão de teste", "identificacao": "Fulano da Silva", **overrides}
     r = client.post(f"/cards/{card_id}/suggestions", json=payload, headers=auth(token))
     return r
 
@@ -41,8 +41,14 @@ def _list_suggestions(client, token, card_id):
     return r.json()
 
 
-def _decide(client, token, card_id, suggestion_id, status):
-    return client.patch(f"/cards/{card_id}/suggestions/{suggestion_id}", json={"status": status}, headers=auth(token))
+def _decide(client, token, card_id, suggestion_id, status, **overrides):
+    body = {"status": status}
+    if status == "aceita":
+        body["prazo_entrega"] = overrides.pop("prazo_entrega", "2026-01-01")
+    elif status == "rejeitada":
+        body["motivo_recusa"] = overrides.pop("motivo_recusa", "Não se aplica")
+    body.update(overrides)
+    return client.patch(f"/cards/{card_id}/suggestions/{suggestion_id}", json=body, headers=auth(token))
 
 
 def _audit_log(client, token, card_id=None):
@@ -54,14 +60,30 @@ def _audit_log(client, token, card_id=None):
 
 def test_create_suggestion_as_common_user(client, admin_token, maria):
     card = _create_card(client, admin_token, "admin")
-    r = _create_suggestion(client, maria["token"], card["id"], texto="Podíamos mudar o prazo")
+    r = _create_suggestion(client, maria["token"], card["id"], texto="Podíamos mudar o prazo", identificacao="Zé")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "pendente"
     assert r.json()["autor"] == maria["nome"]
+    assert r.json()["identificacao"] == "Zé"
 
     sugestoes = _list_suggestions(client, maria["token"], card["id"])
     assert len(sugestoes) == 1
     assert sugestoes[0]["status"] == "pendente"
+
+
+def test_create_suggestion_requires_identificacao(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+
+    r_missing = client.post(
+        f"/cards/{card['id']}/suggestions", json={"texto": "Sem identificação"}, headers=auth(maria["token"]),
+    )
+    assert r_missing.status_code == 422
+
+    r_blank = client.post(
+        f"/cards/{card['id']}/suggestions", json={"texto": "Identificação em branco", "identificacao": "   "},
+        headers=auth(maria["token"]),
+    )
+    assert r_blank.status_code == 400
 
 
 def test_decide_requires_admin(client, admin_token, maria):
@@ -160,14 +182,52 @@ def test_accept_suggestion_with_deleted_etapa_target(client, admin_token, maria)
     assert any(l["acao"] == "sugestao_aceita_sem_aplicar" for l in logs)
 
 
-def test_double_decision_returns_409(client, admin_token, maria):
+def test_decision_can_be_changed_afterwards(client, admin_token, maria):
     card = _create_card(client, admin_token, "admin")
     sug = _create_suggestion(client, maria["token"], card["id"]).json()
 
     r1 = _decide(client, admin_token, card["id"], sug["id"], "aceita")
     assert r1.status_code == 200
-    r2 = _decide(client, admin_token, card["id"], sug["id"], "rejeitada")
-    assert r2.status_code == 409
+    r2 = _decide(client, admin_token, card["id"], sug["id"], "rejeitada", motivo_recusa="Mudei de ideia")
+    assert r2.status_code == 200
+
+    decided = _list_suggestions(client, admin_token, card["id"])[0]
+    assert decided["status"] == "rejeitada"
+    assert decided["motivo_recusa"] == "Mudei de ideia"
+    assert decided["prazo_entrega"] is None
+
+
+def test_reverting_accepted_field_change_restores_old_value(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+    sug = _create_suggestion(
+        client, maria["token"], card["id"],
+        texto="Isso é urgente", campo_alvo="prioridade", valor_proposto="Alta",
+    ).json()
+
+    r1 = _decide(client, admin_token, card["id"], sug["id"], "aceita")
+    assert r1.status_code == 200
+    assert _get_card(client, admin_token, card["id"])["prioridade"] == "Alta"
+
+    r2 = _decide(client, admin_token, card["id"], sug["id"], "rejeitada", motivo_recusa="Não era o caso")
+    assert r2.status_code == 200
+    assert _get_card(client, admin_token, card["id"])["prioridade"] == "Normal"
+
+
+def test_delete_suggestion_reverts_applied_field_and_requires_permission(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+    sug = _create_suggestion(
+        client, maria["token"], card["id"],
+        texto="Isso é urgente", campo_alvo="prioridade", valor_proposto="Alta",
+    ).json()
+    _decide(client, admin_token, card["id"], sug["id"], "aceita")
+
+    r_forbidden = client.delete(f"/cards/{card['id']}/suggestions/{sug['id']}", headers=auth(maria["token"]))
+    assert r_forbidden.status_code == 403
+
+    r = client.delete(f"/cards/{card['id']}/suggestions/{sug['id']}", headers=auth(admin_token))
+    assert r.status_code == 200
+    assert _get_card(client, admin_token, card["id"])["prioridade"] == "Normal"
+    assert _list_suggestions(client, admin_token, card["id"]) == []
 
 
 def test_invalid_prioridade_value_rejected(client, maria):
@@ -183,3 +243,32 @@ def test_status_field_not_allowed_as_suggestion_target(client, maria):
     card = r.json()
     r2 = _create_suggestion(client, maria["token"], card["id"], campo_alvo="status", valor_proposto="col-2")
     assert r2.status_code == 400
+
+
+def test_accept_without_prazo_entrega_rejected(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+    sug = _create_suggestion(client, maria["token"], card["id"]).json()
+    r = client.patch(
+        f"/cards/{card['id']}/suggestions/{sug['id']}", json={"status": "aceita"}, headers=auth(admin_token),
+    )
+    assert r.status_code == 400
+
+
+def test_reject_without_motivo_recusa_rejected(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+    sug = _create_suggestion(client, maria["token"], card["id"]).json()
+    r = client.patch(
+        f"/cards/{card['id']}/suggestions/{sug['id']}", json={"status": "rejeitada"}, headers=auth(admin_token),
+    )
+    assert r.status_code == 400
+
+
+def test_decision_fields_are_persisted(client, admin_token, maria):
+    card = _create_card(client, admin_token, "admin")
+    sug = _create_suggestion(client, maria["token"], card["id"]).json()
+    r = _decide(client, admin_token, card["id"], sug["id"], "aceita", prazo_entrega="2026-03-10")
+    assert r.status_code == 200
+
+    decided = _list_suggestions(client, admin_token, card["id"])[0]
+    assert decided["prazo_entrega"] == "2026-03-10"
+    assert decided["motivo_recusa"] is None

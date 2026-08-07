@@ -70,6 +70,10 @@ def _run_schema_migrations():
         "ALTER TABLE user_notes ADD COLUMN publico BOOLEAN DEFAULT 0",
         "ALTER TABLE user_notes ADD COLUMN compartilhado_com TEXT DEFAULT '[]'",
         "ALTER TABLE roles ADD COLUMN colunas_visiveis TEXT",
+        "ALTER TABLE suggestions ADD COLUMN prazo_entrega VARCHAR",
+        "ALTER TABLE suggestions ADD COLUMN motivo_recusa VARCHAR",
+        "ALTER TABLE suggestions ADD COLUMN valor_anterior VARCHAR",
+        "ALTER TABLE suggestions ADD COLUMN identificacao VARCHAR",
     ]:
         with engine.connect() as conn:
             try:
@@ -140,7 +144,7 @@ def _backfill_item_notifications():
 ADMIN_ROLE_PERMS = {
     "gerenciar_usuarios", "gerenciar_colunas", "reordenar_cards", "criar_card_coluna_privada",
     "editar_card", "excluir_card", "editar_prioridade", "editar_prazo",
-    "gerenciar_etapas", "concluir_etapas", "decidir_sugestoes", "trocar_senha_outros",
+    "gerenciar_etapas", "concluir_etapas", "ver_etapas", "decidir_sugestoes", "trocar_senha_outros",
 }
 
 
@@ -195,6 +199,28 @@ def assign_default_user_roles():
         db.close()
 
 
+def _backfill_ver_etapas_permission():
+    """'ver_etapas' was added after cargos already existed in production/dev
+    databases — without this, every pre-existing cargo would silently lose
+    visibility of the Etapas tab (missing permission key == False), even
+    though showing it to everyone was the behavior before this permission
+    existed. Only touches cargos that have never seen this key; once an admin
+    explicitly saves a cargo with it unchecked, the key is present (False)
+    and this backfill leaves it alone."""
+    db = SessionLocal()
+    try:
+        changed = False
+        for role in db.query(RoleDB).all():
+            perms = role.permissoes or {}
+            if "ver_etapas" not in perms:
+                role.permissoes = {**perms, "ver_etapas": True}
+                changed = True
+        if changed:
+            db.commit()
+    finally:
+        db.close()
+
+
 def run_migrations():
     _migrate_drawings_table()
     Base.metadata.create_all(bind=engine)
@@ -203,3 +229,4 @@ def run_migrations():
     _backfill_card_notifications()
     _backfill_item_notifications()
     _seed_default_roles()
+    _backfill_ver_etapas_permission()

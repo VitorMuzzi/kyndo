@@ -20,6 +20,7 @@ PERMISSIONS = {
     "editar_prazo": "Editar prazo de qualquer card",
     "gerenciar_etapas": "Criar/editar/excluir etapas e sub-etapas",
     "concluir_etapas": "Marcar etapas/sub-etapas como concluídas",
+    "ver_etapas": "Ver a aba de Etapas dentro do card",
     "gerenciar_responsaveis": "Gerenciar responsáveis de um card",
     "decidir_sugestoes": "Aceitar/rejeitar sugestões",
 }

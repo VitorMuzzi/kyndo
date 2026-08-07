@@ -73,12 +73,15 @@ class DrawingSchema(BaseModel):
 
 class SuggestionCreate(BaseModel):
     texto: str
+    identificacao: str  # nome de quem está escrevendo — obrigatório pois a conta pode ser compartilhada
     campo_alvo: Optional[str] = None
     valor_proposto: Optional[str] = None
 
 
 class SuggestionDecision(BaseModel):
     status: str  # 'aceita' | 'rejeitada'
+    prazo_entrega: Optional[str] = None  # obrigatório quando status == 'aceita'
+    motivo_recusa: Optional[str] = None  # obrigatório quando status == 'rejeitada'
 
 
 class RoleCreate(BaseModel):

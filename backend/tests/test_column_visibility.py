@@ -86,7 +86,7 @@ def test_write_endpoints_404_on_card_outside_visible_columns(client, admin_token
     assert client.delete(f"/cards/{card['id']}", headers=auth(utoken)).status_code == 404
     assert client.post(f"/cards/{card['id']}/seen", headers=auth(utoken)).status_code == 404
     assert client.get(f"/cards/{card['id']}/suggestions", headers=auth(utoken)).status_code == 404
-    assert client.post(f"/cards/{card['id']}/suggestions", json={"texto": "x"}, headers=auth(utoken)).status_code == 404
+    assert client.post(f"/cards/{card['id']}/suggestions", json={"texto": "x", "identificacao": "Fulano"}, headers=auth(utoken)).status_code == 404
 
 
 def test_gerenciar_colunas_bypasses_visibility_restriction(client, admin_token):

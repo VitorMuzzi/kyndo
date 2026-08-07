@@ -177,3 +177,35 @@ def test_create_card_requires_permission_in_private_column(client, admin_token, 
 
     r2 = _create_card(client, maria["token"], maria["nome"], status="col-1")
     assert r2.status_code == 200
+
+
+def test_ver_etapas_backfill_defaults_legacy_roles_true_but_preserves_explicit_false(client, admin_token):
+    from database import SessionLocal
+    from models import RoleDB
+    from migrations import _backfill_ver_etapas_permission
+
+    db = SessionLocal()
+    try:
+        db.add(RoleDB(
+            id="role-legacy-sem-ver-etapas", nome="LegadoSemVerEtapas", cor="#000000",
+            protegido=False, permissoes={"decidir_sugestoes": True}, ordem=99,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    _backfill_ver_etapas_permission()
+    roles = _roles_by_name(client, admin_token)
+    assert roles["LegadoSemVerEtapas"]["permissoes"]["ver_etapas"] is True
+
+    db2 = SessionLocal()
+    try:
+        role = db2.query(RoleDB).filter(RoleDB.id == "role-legacy-sem-ver-etapas").first()
+        role.permissoes = {**role.permissoes, "ver_etapas": False}
+        db2.commit()
+    finally:
+        db2.close()
+
+    _backfill_ver_etapas_permission()  # must not clobber an explicit False
+    roles2 = _roles_by_name(client, admin_token)
+    assert roles2["LegadoSemVerEtapas"]["permissoes"]["ver_etapas"] is False

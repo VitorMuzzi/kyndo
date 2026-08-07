@@ -52,7 +52,7 @@ export default function CardModal({ card, col, user, allUsers, allCards, onClose
   const podeDeletar = card?.id && (canDeleteCard || (isAuthor && col?.id === 'col-1'));
   const mostrarPrioridade = canEditPrioridade || prioridade !== 'Normal' || col?.id !== 'col-1';
   const mostrarPrazo = canEditPrazo || prazo;
-  const mostrarEtapas = canCompleteEtapas || checklist.length > 0;
+  const mostrarEtapas = canCompleteEtapas || (checklist.length > 0 && hasPermission(user, 'ver_etapas'));
 
   const normalizeGithubUrl = (url) => {
     const trimmed = url.trim();

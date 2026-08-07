@@ -95,6 +95,7 @@ class SuggestionDB(Base):
     id = Column(String, primary_key=True, index=True)
     card_id = Column(String, index=True)
     autor = Column(String)
+    identificacao = Column(String, nullable=True)  # nome de quem escreveu, digitado à mão — várias pessoas usam a mesma conta
     texto = Column(String)
     campo_alvo = Column(String, nullable=True)
     valor_proposto = Column(String, nullable=True)
@@ -102,6 +103,9 @@ class SuggestionDB(Base):
     data = Column(String)
     decidido_por = Column(String, nullable=True)
     decidido_em = Column(String, nullable=True)
+    prazo_entrega = Column(String, nullable=True)
+    motivo_recusa = Column(String, nullable=True)
+    valor_anterior = Column(String, nullable=True)
 
 
 class NoteDB(Base):
