@@ -81,7 +81,7 @@ export default function CronogramaView({ cards, allUsers, setModal }) {
         <div className="flex items-center gap-1.5">
           {[{ label: '2 semanas', days: 14 }, { label: '1 mês', days: 30 }, { label: '3 meses', days: 90 }].map(opt => (
             <button key={opt.days} onClick={() => { setWindowDays(opt.days); setOffsetDays(0); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${windowDays === opt.days ? 'bg-white text-emerald-800' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${windowDays === opt.days ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' : 'bg-white/15 text-white hover:bg-white/25'}`}>
               {opt.label}
             </button>
           ))}
@@ -96,7 +96,7 @@ export default function CronogramaView({ cards, allUsers, setModal }) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
-        <div className="flex sticky top-0 z-20 bg-emerald-950/95 backdrop-blur-sm shadow-lg">
+        <div className="flex sticky top-0 z-20 bg-slate-900/95 backdrop-blur-sm shadow-lg">
           <div className="shrink-0 w-44 border-r border-white/10 px-3 py-2 flex items-end">
             <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">Responsável</span>
           </div>

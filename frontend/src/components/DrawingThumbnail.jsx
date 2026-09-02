@@ -58,5 +58,5 @@ export default function DrawingThumbnail({ src, size = 56 }) {
     return () => { cancelled = true; };
   }, [src, size]);
 
-  return <canvas ref={canvasRef} width={size} height={size} className="rounded border border-gray-200 shrink-0"/>;
+  return <canvas ref={canvasRef} width={size} height={size} className="rounded border border-slate-700 shrink-0"/>;
 }

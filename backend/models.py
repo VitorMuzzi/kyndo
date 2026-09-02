@@ -41,6 +41,10 @@ class CardDB(Base):
     ordem = Column(Integer, default=0)
     updated_em = Column(String, default="")
     alteracoes = Column(Integer, default=0)
+    recorrente = Column(Boolean, default=False)
+    recorrencia_dias = Column(Integer, nullable=True)
+    recorrencia_coluna_reset = Column(String, nullable=True)
+    recorrencia_proximo_reset = Column(String, nullable=True)
 
 
 class CardSeenDB(Base):
@@ -106,6 +110,18 @@ class SuggestionDB(Base):
     prazo_entrega = Column(String, nullable=True)
     motivo_recusa = Column(String, nullable=True)
     valor_anterior = Column(String, nullable=True)
+
+
+class AttachmentDB(Base):
+    __tablename__ = "attachments"
+    id = Column(String, primary_key=True, index=True)
+    card_id = Column(String, index=True)
+    nome_original = Column(String)
+    nome_arquivo = Column(String)  # nome único no disco — nunca o nome enviado pelo usuário
+    content_type = Column(String, nullable=True)
+    tamanho = Column(Integer)
+    enviado_por = Column(String)
+    enviado_em = Column(String)
 
 
 class NoteDB(Base):

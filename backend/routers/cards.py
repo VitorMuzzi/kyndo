@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +9,7 @@ from database import get_db
 from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, UserDB
 from schemas import CardReorderItem, CardSchema
 from security import get_current_user
-from audit import log_card_created, log_card_deleted, process_card_update
+from audit import _mk_log, log_card_created, log_card_deleted, process_card_update
 from rbac import filter_checklist_for_permission, get_user_permissions, get_visible_column_ids, require_permission
 
 router = APIRouter()
@@ -63,6 +63,10 @@ def _revert_unauthorized_fields(db, db_card, card, current_user):
         can_manage="gerenciar_etapas" in perms, can_complete="concluir_etapas" in perms,
     )
 
+    if (bool(db_card.recorrente) != card.recorrente or db_card.recorrencia_dias != card.recorrencia_dias) and "gerenciar_etapas" not in perms:
+        card.recorrente = bool(db_card.recorrente)
+        card.recorrencia_dias = db_card.recorrencia_dias
+
 
 def _annotate_checklist(checklist, item_seen_map):
     annotated = []
@@ -85,11 +89,55 @@ def _serialize_card(c: CardDB, visto_versao, item_seen_map):
         "updated_em": c.updated_em,
         "alteracoes_nao_vistas": alteracoes_nao_vistas,
         "nao_visto": alteracoes_nao_vistas > 0,
+        "recorrente": bool(c.recorrente), "recorrencia_dias": c.recorrencia_dias,
+        "recorrencia_coluna_reset": c.recorrencia_coluna_reset, "recorrencia_proximo_reset": c.recorrencia_proximo_reset,
     }
+
+
+def _reset_checklist_progress(checklist):
+    reiniciado = []
+    for item in checklist or []:
+        item = dict(item)
+        item["concluido"] = False
+        item["concluidoPor"] = None
+        item["subetapas"] = [{**s, "concluido": False, "concluidoPor": None} for s in (item.get("subetapas") or [])]
+        reiniciado.append(item)
+    return reiniciado
+
+
+def _apply_due_recurrences(db):
+    """Lazily reopens recurring cards whose period has elapsed — checked on
+    every read instead of via a background scheduler, matching this app's
+    no-cron-process architecture. Catches up (advances proximo_reset in a
+    loop) if the server was down across more than one period, so a card
+    never fires its reset more than once per call regardless of how long
+    it's been."""
+    now = datetime.now()
+    now_iso = now.isoformat()
+    due = db.query(CardDB).filter(
+        CardDB.recorrente == True, CardDB.recorrencia_proximo_reset != None,  # noqa: E711,E712
+        CardDB.recorrencia_proximo_reset <= now_iso,
+    ).all()
+    if not due:
+        return
+    for card in due:
+        card.checklist = _reset_checklist_progress(card.checklist)
+        dias = card.recorrencia_dias or 1
+        if card.recorrencia_coluna_reset and db.query(ColumnDB).filter(ColumnDB.id == card.recorrencia_coluna_reset).first():
+            card.status = card.recorrencia_coluna_reset
+        proximo = datetime.fromisoformat(card.recorrencia_proximo_reset)
+        while proximo <= now:
+            proximo += timedelta(days=dias)
+        card.recorrencia_proximo_reset = proximo.isoformat()
+        card.alteracoes = (card.alteracoes or 0) + 1
+        card.updated_em = now_iso
+        _mk_log(db, card.id, card.titulo, "sistema", "tarefa_recorrente_reiniciada", detalhe=f"checklist reiniciado (recorrência de {dias} dia{'s' if dias != 1 else ''})")
+    db.commit()
 
 
 @router.get("/cards")
 def get_cards(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    _apply_due_recurrences(db)
     all_cards = db.query(CardDB).all()
     visible = get_visible_column_ids(db, current_user.id)
     if visible is not None:
@@ -116,6 +164,7 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
     data_atual = now.strftime("%d/%m/%Y")
     now_iso = now.isoformat()
     max_ordem = db.query(CardDB).filter(CardDB.status == card.status).count()
+    recorrente = bool(card.recorrente and card.recorrencia_dias)
     novo = CardDB(
         id=f"card-{uuid.uuid4().hex[:8]}",
         titulo=card.titulo,
@@ -131,6 +180,10 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
         github_url=card.github_url or None,
         ordem=max_ordem,
         updated_em=now_iso,
+        recorrente=recorrente,
+        recorrencia_dias=card.recorrencia_dias if recorrente else None,
+        recorrencia_coluna_reset=card.status if recorrente else None,
+        recorrencia_proximo_reset=(now + timedelta(days=card.recorrencia_dias)).isoformat() if recorrente else None,
     )
     db.add(novo)
     log_card_created(db, novo, current_user.nome)
@@ -176,6 +229,20 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.github_url = card.github_url or None
         db_card.ordem = card.ordem
         now_iso = datetime.now().isoformat()
+
+        recorrente_novo = bool(card.recorrente and card.recorrencia_dias)
+        rearmar = recorrente_novo and (not db_card.recorrente or db_card.recorrencia_dias != card.recorrencia_dias)
+        if rearmar:
+            db_card.recorrencia_coluna_reset = db_card.status
+            db_card.recorrencia_proximo_reset = (datetime.now() + timedelta(days=card.recorrencia_dias)).isoformat()
+            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_configurada", detalhe=f"a cada {card.recorrencia_dias} dia(s), volta para {db_card.status}")
+        elif not recorrente_novo and db_card.recorrente:
+            db_card.recorrencia_coluna_reset = None
+            db_card.recorrencia_proximo_reset = None
+            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_desativada")
+        db_card.recorrente = recorrente_novo
+        db_card.recorrencia_dias = card.recorrencia_dias if recorrente_novo else None
+
         db_card.updated_em = now_iso
         if meaningful:
             db_card.alteracoes = (db_card.alteracoes or 0) + 1

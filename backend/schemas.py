@@ -41,6 +41,8 @@ class CardSchema(BaseModel):
     responsaveis: List[str] = []
     github_url: Optional[str] = ""
     ordem: int = 0
+    recorrente: bool = False
+    recorrencia_dias: Optional[int] = None
 
 
 class CardReorderItem(BaseModel):

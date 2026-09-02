@@ -74,6 +74,10 @@ def _run_schema_migrations():
         "ALTER TABLE suggestions ADD COLUMN motivo_recusa VARCHAR",
         "ALTER TABLE suggestions ADD COLUMN valor_anterior VARCHAR",
         "ALTER TABLE suggestions ADD COLUMN identificacao VARCHAR",
+        "ALTER TABLE cards ADD COLUMN recorrente BOOLEAN DEFAULT 0",
+        "ALTER TABLE cards ADD COLUMN recorrencia_dias INTEGER",
+        "ALTER TABLE cards ADD COLUMN recorrencia_coluna_reset VARCHAR",
+        "ALTER TABLE cards ADD COLUMN recorrencia_proximo_reset VARCHAR",
     ]:
         with engine.connect() as conn:
             try:

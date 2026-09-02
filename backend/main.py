@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from init_data import init_db
 from migrations import assign_default_user_roles, run_migrations
-from routers import audit, auth, cards, columns, drawings, notes, roles, suggestions, users
+from routers import attachments, audit, auth, cards, columns, drawings, github, metrics, notes, roles, suggestions, users
 
 run_migrations()
 init_db()
@@ -32,3 +32,6 @@ app.include_router(drawings.router)
 app.include_router(audit.router)
 app.include_router(suggestions.router)
 app.include_router(roles.router)
+app.include_router(attachments.router)
+app.include_router(metrics.router)
+app.include_router(github.router)

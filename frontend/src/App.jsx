@@ -3,7 +3,7 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff } from 'lucide-react';
 
 import { API, authFetch } from './api.js';
-import { PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon } from './constants.jsx';
+import { APP_VERSION, PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon } from './constants.jsx';
 
 import LoginScreen from './components/LoginScreen.jsx';
 import ChangePasswordScreen from './components/ChangePasswordScreen.jsx';
@@ -13,6 +13,7 @@ import CardModal from './components/CardModal.jsx';
 import CronogramaView from './components/CronogramaView.jsx';
 import NotasView from './components/NotasView.jsx';
 import DesenhoView from './components/DesenhoView.jsx';
+import DashboardView from './components/DashboardView.jsx';
 import SearchModal from './components/SearchModal.jsx';
 
 export default function App() {
@@ -367,7 +368,8 @@ export default function App() {
   return (
     <div className="relative h-[100dvh] font-sans overflow-hidden"
       onMouseMove={e => { setShowLeftArrow(e.clientX < 80); setShowRightArrow(e.clientX > window.innerWidth - 80); }}>
-      <div className="fixed inset-0 bg-gradient-to-br from-emerald-800 via-teal-900 to-emerald-900 -z-10" />
+      <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 -z-10" />
+      <span className="fixed bottom-1.5 right-2 z-[5] text-[9px] text-white/20 font-mono pointer-events-none select-none">{APP_VERSION}</span>
 
       {showSearch && (
         <SearchModal
@@ -382,6 +384,7 @@ export default function App() {
         <CardModal
           card={modal.card}
           col={cols.find(c => c.id === modal.status)}
+          allColumns={cols}
           user={user}
           allUsers={allUsers}
           allCards={cardsArray}
@@ -399,7 +402,7 @@ export default function App() {
       )}
       <header
         ref={headerRef}
-        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-white/10 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${showHeader ? 'translate-y-0' : '-translate-y-full'}`}
+        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-slate-900/90 border-b border-slate-800 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${showHeader ? 'translate-y-0' : '-translate-y-full'}`}
         onMouseEnter={() => setHeaderVisible(true)}
         onMouseLeave={() => setHeaderVisible(false)}
       >
@@ -432,9 +435,10 @@ export default function App() {
               { key: 'cronograma', label: 'Cronograma' },
               { key: 'notas',      label: 'Notas' },
               { key: 'desenho',    label: 'Desenho' },
+              { key: 'dashboard',  label: 'Dashboard' },
             ].map(v => (
               <button key={v.key} onClick={() => setActiveView(v.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeView === v.key ? 'bg-white text-emerald-800 shadow' : 'text-white hover:bg-white/10'}`}>
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeView === v.key ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow' : 'text-white hover:bg-white/10'}`}>
                 {v.label}
               </button>
             ))}
@@ -442,21 +446,21 @@ export default function App() {
 
           {/* Filter dropdown */}
           <div className="relative flex-grow sm:flex-none">
-            <div onClick={() => setFiltroAberto(!filtroAberto)} className="flex items-center justify-between gap-2 bg-white/90 p-2 md:px-4 rounded-xl text-gray-800 shadow-lg border border-white/20 cursor-pointer h-full transition-colors hover:bg-white">
+            <div onClick={() => setFiltroAberto(!filtroAberto)} className="flex items-center justify-between gap-2 bg-slate-800/90 p-2 md:px-4 rounded-xl text-slate-100 shadow-lg border border-slate-700 cursor-pointer h-full transition-colors hover:bg-slate-800">
               <div className="flex items-center gap-2">
-                <Filter size={16} className="text-emerald-600 shrink-0" />
+                <Filter size={16} className="text-emerald-400 shrink-0" />
                 <span className="font-bold text-xs md:text-sm truncate">
                   {filtroAtivo === 'todas' ? 'Todas Demandas' : filtroAtivo === 'minhas' ? 'Minhas Demandas' : `Prio: ${filtroAtivo}`}
-                  {ordenacao !== 'prioridade_desc' && <span className="ml-1 text-emerald-600">{ordenacao === 'prioridade_asc' ? '↑' : '–'}</span>}
+                  {ordenacao !== 'prioridade_desc' && <span className="ml-1 text-emerald-400">{ordenacao === 'prioridade_asc' ? '↑' : '–'}</span>}
                 </span>
               </div>
-              <ChevronDown size={14} className="text-gray-500 shrink-0" />
+              <ChevronDown size={14} className="text-slate-400 shrink-0" />
             </div>
             {filtroAberto && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setFiltroAberto(false)} />
-                <div className="absolute top-full mt-2 right-0 sm:right-auto w-full min-w-[180px] bg-white rounded-xl shadow-2xl border border-gray-200 z-50 overflow-hidden">
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Filtrar</div>
+                <div className="absolute top-full mt-2 right-0 sm:right-auto w-full min-w-[180px] bg-slate-800 rounded-xl shadow-2xl border border-slate-700 z-50 overflow-hidden">
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-500 uppercase tracking-widest">Filtrar</div>
                   {[
                     { val: 'todas',  label: 'Todas as Demandas' },
                     { val: 'minhas', label: 'Minhas Demandas' },
@@ -467,17 +471,17 @@ export default function App() {
                     { val: 'Urgente', label: 'Prioridade: Urgente' },
                   ].map((o, i) =>
                     o.divider
-                      ? <div key={`d${i}`} className="h-px bg-gray-100 my-1 mx-2" />
-                      : <div key={o.val} onClick={() => { setFiltroAtivo(o.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-50 cursor-pointer text-xs md:text-sm font-bold transition-colors ${filtroAtivo === o.val ? 'text-emerald-600 bg-emerald-50/50' : 'text-gray-700'}`}>{o.label}</div>
+                      ? <div key={`d${i}`} className="h-px bg-slate-700 my-1 mx-2" />
+                      : <div key={o.val} onClick={() => { setFiltroAtivo(o.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-500/10 cursor-pointer text-xs md:text-sm font-bold transition-colors ${filtroAtivo === o.val ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-300'}`}>{o.label}</div>
                   )}
-                  <div className="h-px bg-gray-100 my-1 mx-2" />
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Ordenação</div>
+                  <div className="h-px bg-slate-700 my-1 mx-2" />
+                  <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-500 uppercase tracking-widest">Ordenação</div>
                   {[
                     { val: 'prioridade_desc', label: '↓ Maior prioridade primeiro' },
                     { val: 'prioridade_asc',  label: '↑ Menor prioridade primeiro' },
                     { val: 'padrao',          label: '– Sem ordenação' },
                   ].map(o => (
-                    <div key={o.val} onClick={() => { setOrdenacao(o.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-50 cursor-pointer text-xs md:text-sm font-bold transition-colors ${ordenacao === o.val ? 'text-emerald-600 bg-emerald-50/50' : 'text-gray-700'}`}>{o.label}</div>
+                    <div key={o.val} onClick={() => { setOrdenacao(o.val); setFiltroAberto(false); }} className={`p-3 px-4 hover:bg-emerald-500/10 cursor-pointer text-xs md:text-sm font-bold transition-colors ${ordenacao === o.val ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-300'}`}>{o.label}</div>
                   ))}
                 </div>
               </>
@@ -491,7 +495,7 @@ export default function App() {
               <span className="font-bold text-xs md:text-sm truncate max-w-[80px] md:max-w-none">{user.nome}</span>
             </div>
             {canAccessAdminPanel && (
-              <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }} className="text-[10px] md:text-xs bg-orange-500 hover:bg-orange-600 px-2 md:px-3 py-1 rounded font-bold uppercase transition-colors shadow-md">
+              <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }} className="text-[10px] md:text-xs bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 px-2 md:px-3 py-1 rounded font-bold uppercase transition-colors shadow-md">
                 Config
               </button>
             )}
@@ -532,6 +536,11 @@ export default function App() {
             onOpenItemHandled={() => setPendingOpenItem(null)} />
         </div>
       )}
+      {activeView === 'dashboard' && (
+        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+          <DashboardView cardsById={cards} setModal={setModal} />
+        </div>
+      )}
 
       {/* Board view */}
       <div
@@ -548,21 +557,21 @@ export default function App() {
                     <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={!canManageColumns}>
                       {(p, snapshot) => (
                         <div ref={p.innerRef} {...p.draggableProps}
-                          className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl min-h-[120px] max-h-[calc(100dvh-4rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
-                          style={{ ...p.draggableProps.style, backgroundColor: col.cor }}>
+                          className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl border border-t-[6px] border-slate-800 min-h-[120px] max-h-[calc(100dvh-4rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
+                          style={{ ...p.draggableProps.style, borderTopColor: col.cor, background: `linear-gradient(180deg, ${col.cor}2e 0%, #0f172a 60%)` }}>
 
                           <div {...p.dragHandleProps} className="p-3 pl-4 flex items-center justify-between gap-2 relative shrink-0">
                             <div className="flex items-center gap-2">
-                              {col.publica ? <Unlock size={12} className="text-green-600" /> : <Lock size={12} className="text-gray-500" />}
+                              {col.publica ? <Unlock size={12} className="text-emerald-500" /> : <Lock size={12} className="text-slate-500" />}
                               <input
                                 disabled={!canManageColumns}
                                 value={col.titulo}
                                 onChange={e => handleColTitleChange(col, e.target.value)}
-                                className="bg-transparent font-bold text-gray-800 text-sm w-full outline-none uppercase tracking-widest"
+                                className="bg-transparent font-bold text-slate-100 text-sm w-full outline-none uppercase tracking-widest disabled:opacity-100"
                               />
                             </div>
                             {canManageColumns && (
-                              <button onClick={() => setActiveMenu(activeMenu === col.id ? null : col.id)} className="p-1 hover:bg-black/5 rounded transition-colors">
+                              <button onClick={() => setActiveMenu(activeMenu === col.id ? null : col.id)} className="p-1 text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded transition-colors">
                                 <MoreHorizontal size={18} />
                               </button>
                             )}
@@ -626,7 +635,7 @@ export default function App() {
                                         {(kp, kSnap) => (
                                           <div ref={kp.innerRef} {...kp.draggableProps} {...kp.dragHandleProps}
                                             onClick={() => setModal({ card, status: col.id })}
-                                            className={`relative p-4 rounded-xl cursor-pointer hover:opacity-80 transition-all flex flex-col gap-2 ${stylePrioridade}`}
+                                            className={`relative p-4 rounded-xl bg-slate-800 border border-slate-700/80 cursor-pointer hover:bg-slate-700/70 transition-all flex flex-col gap-2 ${stylePrioridade}`}
                                             style={{ ...kp.draggableProps.style, ...(kSnap.isDropAnimating && { transitionDuration: '0.001s' }) }}>
 
                                             <div className="flex justify-between items-start gap-1.5">
@@ -635,7 +644,7 @@ export default function App() {
                                               </span>
                                               <div className="flex items-center gap-1.5 shrink-0">
                                                 {card.prazo && (
-                                                  <span className="flex items-center gap-1 text-xs text-orange-700 bg-orange-100 font-bold px-1.5 py-0.5 rounded">
+                                                  <span className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/15 font-bold px-1.5 py-0.5 rounded">
                                                     <Calendar size={12} /> {formatarData(card.prazo)}
                                                   </span>
                                                 )}
@@ -648,35 +657,35 @@ export default function App() {
                                               </div>
                                             </div>
 
-                                            <p className="text-base font-bold text-gray-800 leading-tight">{card.titulo}</p>
+                                            <p className="text-base font-bold text-slate-100 leading-tight">{card.titulo}</p>
 
                                             {totalEtapas > 0 && progresso > 0 && (
                                               <div>
                                                 <div className="flex justify-between items-center mb-1">
-                                                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Progresso</span>
-                                                  <span className="text-xl font-black text-gray-800">{progresso}%</span>
+                                                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Progresso</span>
+                                                  <span className="text-xl font-black text-slate-100">{progresso}%</span>
                                                 </div>
-                                                <div className="w-full h-2 bg-gray-300/50 rounded-full overflow-hidden">
+                                                <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
                                                   <div className={`h-full transition-all duration-300 ${progresso === 100 ? 'bg-emerald-600' : 'bg-teal-500'}`} style={{ width: `${progresso}%` }} />
                                                 </div>
                                               </div>
                                             )}
 
-                                            <div className="flex justify-between items-center mt-1 border-t pt-2 border-black/10">
+                                            <div className="flex justify-between items-center mt-1 border-t pt-2 border-slate-700">
                                               <div className="flex flex-wrap items-center gap-1">
-                                                <span className="text-xs text-gray-600 uppercase font-bold">Resp.:</span>
+                                                <span className="text-xs text-slate-400 uppercase font-bold">Resp.:</span>
                                                 {(card.responsaveis?.length > 0 ? card.responsaveis : [card.autor]).filter(Boolean).map(nome => (
                                                   <span key={nome} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>{nome}</span>
                                                 ))}
                                               </div>
                                               <div className="flex items-center gap-2">
                                                 {card.github_url && (
-                                                  <a href={card.github_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Abrir repositório no GitHub" className="text-gray-700 hover:text-black transition-colors">
+                                                  <a href={card.github_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Abrir repositório no GitHub" className="text-slate-400 hover:text-white transition-colors">
                                                     <GitHubIcon size={14} />
                                                   </a>
                                                 )}
                                                 {qtdComentarios > 0 && (
-                                                  <div className="flex items-center gap-1 text-xs text-gray-600 font-bold bg-white/60 px-1.5 rounded">
+                                                  <div className="flex items-center gap-1 text-xs text-slate-300 font-bold bg-slate-900/60 px-1.5 rounded">
                                                     <MessageSquare size={12} /> {qtdComentarios}
                                                   </div>
                                                 )}
@@ -694,7 +703,7 @@ export default function App() {
                           </Droppable>
 
                           {(canCreateCardAnywhere || col.publica) && (
-                            <button onClick={() => setModal({ status: col.id })} className="m-2 mt-auto shrink-0 p-2 text-xs font-bold text-gray-500 hover:bg-black/5 rounded-xl flex items-center gap-2 transition-colors">
+                            <button onClick={() => setModal({ status: col.id })} className="m-2 mt-auto shrink-0 p-2 text-xs font-bold text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-xl flex items-center gap-2 transition-colors">
                               <Plus size={16} /> Sugerir demanda
                             </button>
                           )}

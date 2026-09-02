@@ -10,6 +10,9 @@ __pycache__/
 demandas.db
 *.sqlite3
 
+# Anexos de cards (arquivos enviados pelos usuários — NUNCA SUBIR)
+uploads/
+
 # Variáveis de Ambiente e Segredos
 .env
 

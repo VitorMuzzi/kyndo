@@ -1,14 +1,16 @@
 import React from 'react';
 
+export const APP_VERSION = 'v1.6.0';
+
 export const USER_COLORS = [
-  'bg-blue-100 text-blue-700',
-  'bg-purple-100 text-purple-700',
-  'bg-orange-100 text-orange-700',
-  'bg-pink-100 text-pink-700',
-  'bg-teal-100 text-teal-700',
-  'bg-yellow-100 text-yellow-800',
-  'bg-red-100 text-red-700',
-  'bg-indigo-100 text-indigo-700',
+  'bg-blue-500/15 text-blue-300',
+  'bg-purple-500/15 text-purple-300',
+  'bg-orange-500/15 text-orange-300',
+  'bg-pink-500/15 text-pink-300',
+  'bg-teal-500/15 text-teal-300',
+  'bg-yellow-500/15 text-yellow-300',
+  'bg-red-500/15 text-red-300',
+  'bg-indigo-500/15 text-indigo-300',
 ];
 
 export const userColor = (nome = '') => {
@@ -18,17 +20,17 @@ export const userColor = (nome = '') => {
 };
 
 export const PRIORIDADES_BADGE = {
-  'Baixa':   'bg-green-600 text-white shadow-sm',
-  'Normal':  'bg-yellow-400 text-gray-900 shadow-sm',
-  'Alta':    'bg-orange-500 text-white shadow-sm',
-  'Urgente': 'bg-red-600 text-white font-black shadow-sm',
+  'Baixa':   'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-sm',
+  'Normal':  'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 shadow-sm',
+  'Alta':    'bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-sm',
+  'Urgente': 'bg-gradient-to-r from-red-600 to-rose-600 text-white font-black shadow-sm',
 };
 
 export const PRIORIDADE_CARD_STYLE = {
-  'Baixa':   'bg-green-100 border-green-500 border-2',
-  'Normal':  'bg-yellow-50 border-yellow-400 border-2',
-  'Alta':    'bg-orange-100 border-orange-500 border-2',
-  'Urgente': 'bg-red-200 border-red-600 border-2 shadow-md shadow-red-300/50',
+  'Baixa':   'border-l-4 border-l-emerald-500 hover:shadow-[0_0_24px_-6px_rgba(16,185,129,0.45)]',
+  'Normal':  'border-l-4 border-l-amber-400 hover:shadow-[0_0_24px_-6px_rgba(251,191,36,0.45)]',
+  'Alta':    'border-l-4 border-l-orange-500 hover:shadow-[0_0_24px_-6px_rgba(249,115,22,0.45)]',
+  'Urgente': 'border-l-4 border-l-red-500 shadow-[0_0_18px_-6px_rgba(239,68,68,0.35)] hover:shadow-[0_0_28px_-6px_rgba(239,68,68,0.55)]',
 };
 
 export const PRIORIDADE_ORDEM = { 'Urgente': 4, 'Alta': 3, 'Normal': 2, 'Baixa': 1 };

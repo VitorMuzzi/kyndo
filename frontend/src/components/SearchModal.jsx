@@ -40,7 +40,7 @@ export default function SearchModal({ cards, cols, onSelect, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[300] flex items-start justify-center pt-[12vh] px-4" onClick={onClose}>
-      <div className="w-full max-w-xl bg-emerald-950/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/15 overflow-hidden"
+      <div className="w-full max-w-xl bg-slate-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700 overflow-hidden"
         onClick={e => e.stopPropagation()}>
 
         {/* Input */}
