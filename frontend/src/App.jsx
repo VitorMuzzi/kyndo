@@ -211,12 +211,20 @@ export default function App() {
     const method  = d.id ? 'PUT' : 'POST';
     const url     = d.id ? `${API}/cards/${d.id}` : `${API}/cards`;
     const payload = { ...d, status: finalStatus, prioridade: finalPriority };
-    authFetch(url, { method, body: JSON.stringify(payload) }).then(res => {
-      if (res.ok && method === 'PUT')
+    authFetch(url, { method, body: JSON.stringify(payload) }).then(async res => {
+      // Fechar o modal sem olhar o status jogava fora tudo que a pessoa
+      // digitou quando o servidor recusava (403 ao criar em coluna privada,
+      // por exemplo) — e sem nenhuma mensagem. Erro mantém o modal aberto.
+      if (!res.ok) {
+        const corpo = await res.json().catch(() => ({}));
+        alert(corpo.detail || 'Não foi possível salvar. Nada foi perdido — tente de novo.');
+        return;
+      }
+      if (method === 'PUT')
         setCards(prev => prev[d.id] ? { ...prev, [d.id]: { ...prev[d.id], ...payload } } : prev);
       setModal(null);
       sync();
-    });
+    }).catch(() => alert('Falha de conexão com o servidor. Nada foi salvo.'));
   };
 
   const onDragStart = () => { isDragging.current = true; };
@@ -263,16 +271,38 @@ export default function App() {
 
     const latestCards = cardsRef.current;
     const card      = latestCards[draggableId];
+    // Um sync que resolva no meio do arrasto pode ter tirado o card do mapa;
+    // sem isso, o acesso a card.prioridade logo abaixo estoura.
+    if (!card) return;
     const sameCol   = source.droppableId === destination.droppableId;
     const targetCol = cols.find(c => c.id === destination.droppableId);
     const finalPriority = (targetCol?.auto_concluido) ? 'Baixa' : card.prioridade;
 
+    // source.index/destination.index são posições na lista RENDERIZADA, que o
+    // filtroAtivo encurta. Aplicar esses índices direto na lista completa move
+    // o card errado — por isso os dois ramos abaixo traduzem via âncora.
+    const applyFilter = (id) => {
+      const c = latestCards[id];
+      if (!c) return false;
+      if (filtroAtivo === 'minhas') return c.autor === user.nome || (c.responsaveis || []).includes(user.nome);
+      if (['Baixa', 'Normal', 'Alta', 'Urgente'].includes(filtroAtivo)) return c.prioridade === filtroAtivo;
+      return true;
+    };
+
     if (sameCol) {
       const ids = getColCardIds(source.droppableId, latestCards);
-      const [moved] = ids.splice(source.index, 1);
-      ids.splice(destination.index, 0, moved);
-      const reordered = ids.map((id, i) => ({ id, ordem: i }));
-      setColOrder(prev => ({ ...prev, [source.droppableId]: ids }));
+      // Tira o card arrastado e reinsere na frente do card que estava na
+      // posição de destino da lista visível (mesma tradução do ramo entre
+      // colunas, que já fazia isso certo).
+      const semMovido = ids.filter(id => id !== draggableId);
+      const visiveisSemMovido = semMovido.filter(applyFilter);
+      const anchorId = visiveisSemMovido[destination.index];
+      const insertAt = anchorId !== undefined ? semMovido.indexOf(anchorId) : semMovido.length;
+      const novaOrdem = [...semMovido];
+      novaOrdem.splice(insertAt, 0, draggableId);
+
+      const reordered = novaOrdem.map((id, i) => ({ id, ordem: i }));
+      setColOrder(prev => ({ ...prev, [source.droppableId]: novaOrdem }));
       setCards(prev => {
         const next = { ...prev };
         reordered.forEach(({ id, ordem }) => { if (next[id]) next[id] = { ...next[id], ordem }; });
@@ -296,13 +326,6 @@ export default function App() {
 
       // destination.index is a position in the rendered (filtroAtivo-filtered) list.
       // Map it to the correct insertion point in cleanDstIds.
-      const applyFilter = (id) => {
-        const c = latestCards[id];
-        if (!c) return false;
-        if (filtroAtivo === 'minhas') return c.autor === user.nome || (c.responsaveis || []).includes(user.nome);
-        if (['Baixa', 'Normal', 'Alta', 'Urgente'].includes(filtroAtivo)) return c.prioridade === filtroAtivo;
-        return true;
-      };
       const visibleDstIds = cleanDstIds.filter(applyFilter);
       const anchorId = visibleDstIds[destination.index];
       const insertAt = anchorId !== undefined ? cleanDstIds.indexOf(anchorId) : cleanDstIds.length;
@@ -319,18 +342,21 @@ export default function App() {
         [source.droppableId]: newSrcIds,
         [destination.droppableId]: newDstIds,
       }));
+      // Encadeado, não em paralelo: o PUT do card carrega o `ordem` ANTIGO, e
+      // disparar os dois juntos deixava a ordem final na sorte de qual
+      // resposta chegasse por último — se o reorder ganhasse a corrida, o card
+      // voltava pro lugar de origem no próximo reload.
+      const ordensNovas = [
+        ...newSrcIds.map((id, i) => ({ id, ordem: i })),
+        ...newDstIds.map((id, i) => ({ id, ordem: i })),
+      ];
       authFetch(`${API}/cards/${draggableId}`, {
         method: 'PUT',
         body: JSON.stringify(updatedCard),
-      });
-      // Persist new order for both columns so page refresh preserves position
-      authFetch(`${API}/cards/reorder`, {
+      }).then(() => authFetch(`${API}/cards/reorder`, {
         method: 'PUT',
-        body: JSON.stringify([
-          ...newSrcIds.map((id, i) => ({ id, ordem: i })),
-          ...newDstIds.map((id, i) => ({ id, ordem: i })),
-        ]),
-      });
+        body: JSON.stringify(ordensNovas),
+      }));
     }
   };
 
@@ -381,6 +407,13 @@ export default function App() {
 
       {modal && (
         <CardModal
+          // Sem key, navegar de card pra card (menção @[card:...], Cronograma,
+          // Dashboard, busca, botão voltar) reaproveita a mesma instância — e
+          // o CardModal semeia todo o estado editável em inicializadores
+          // useState, que só rodam na montagem. O título/descrição/checklist do
+          // card anterior ficavam no estado e "Salvar Tudo" gravava o conteúdo
+          // de um card em cima do outro. A key força a remontagem.
+          key={modal.card?.id || 'novo-card'}
           card={modal.card}
           col={cols.find(c => c.id === modal.status)}
           allColumns={cols}
@@ -389,7 +422,15 @@ export default function App() {
           allCards={cardsArray}
           onClose={() => setModal(null)}
           onSave={handleSaveCard}
-          onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(() => { setModal(null); sync(); })}
+          onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(async res => {
+            if (!res.ok) {
+              const corpo = await res.json().catch(() => ({}));
+              alert(corpo.detail || 'Não foi possível excluir este card.');
+              return;
+            }
+            setModal(null);
+            sync();
+          }).catch(() => alert('Falha de conexão com o servidor.'))}
           onOpenLinkedItem={openLinkedItem}
           onNavigateToCard={onNavigateToCard}
           onMerged={async ({ destino_id }) => {

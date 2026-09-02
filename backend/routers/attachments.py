@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from attachment_storage import MAX_UPLOAD_BYTES, UPLOAD_DIR
 from audit import _mk_log
 from database import get_db
 from models import AttachmentDB, CardDB, UserDB
@@ -13,13 +14,6 @@ from rbac import get_user_permissions, get_visible_column_ids
 from security import get_current_user
 
 router = APIRouter()
-
-# Overridable via env so tests can redirect uploads to an isolated temp dir —
-# mirrors how conftest.py isolates DATABASE_URL.
-UPLOAD_DIR = os.getenv("UPLOAD_DIR") or os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads"
-)
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB — plenty for prints/PDFs, small enough to not silently fill the disk
 
 
 def _assert_card_visible(db, current_user, db_card):
@@ -99,8 +93,12 @@ def download_attachment(attachment_id: str, db: Session = Depends(get_db), curre
     if not a:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
     db_card = db.query(CardDB).filter(CardDB.id == a.card_id).first()
-    if db_card:
-        _assert_card_visible(db, current_user, db_card)
+    # Anexo sem card é órfão: não há como provar que quem pede tem acesso, então
+    # não se entrega. Antes isso caía num `if db_card:` que simplesmente pulava a
+    # checagem e liberava o arquivo pra qualquer usuário autenticado.
+    if not db_card:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    _assert_card_visible(db, current_user, db_card)
     path = os.path.join(UPLOAD_DIR, a.nome_arquivo)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Arquivo não encontrado no servidor")
@@ -113,8 +111,9 @@ def delete_attachment(attachment_id: str, db: Session = Depends(get_db), current
     if not a:
         raise HTTPException(status_code=404, detail="Anexo não encontrado")
     db_card = db.query(CardDB).filter(CardDB.id == a.card_id).first()
-    if db_card:
-        _assert_card_visible(db, current_user, db_card)
+    if not db_card:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    _assert_card_visible(db, current_user, db_card)
     perms = get_user_permissions(db, current_user.id)
     if a.enviado_por != current_user.nome and "editar_card" not in perms:
         raise HTTPException(status_code=403, detail="Sem permissão para excluir este anexo")
@@ -122,8 +121,7 @@ def delete_attachment(attachment_id: str, db: Session = Depends(get_db), current
     path = os.path.join(UPLOAD_DIR, a.nome_arquivo)
     if os.path.isfile(path):
         os.remove(path)
-    if db_card:
-        _mk_log(db, a.card_id, db_card.titulo, current_user.nome, "anexo_removido", detalhe=a.nome_original)
+    _mk_log(db, a.card_id, db_card.titulo, current_user.nome, "anexo_removido", detalhe=a.nome_original)
     db.delete(a)
     db.commit()
     return {"ok": True}

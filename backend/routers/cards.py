@@ -5,6 +5,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from attachment_storage import purgar_anexos_do_card
 from database import get_db
 from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, UserDB
 from schemas import CardMergeRequest, CardReorderItem, CardSchema
@@ -27,6 +28,20 @@ def _assert_card_visible(db, current_user, db_card):
 
 def _norm(v):
     return v or ""
+
+
+def _merge_comentarios_for_permission(old_comentarios, new_comentarios, can_edit: bool):
+    """Sem `editar_card`, comentário só entra — nunca some nem muda. Mantém a
+    lista guardada exatamente como está e deixa passar só os ids inéditos."""
+    if can_edit:
+        return new_comentarios
+    guardados = [c for c in (old_comentarios or []) if isinstance(c, dict)]
+    ids_guardados = {c.get("id") for c in guardados}
+    novos = [
+        c for c in (new_comentarios or [])
+        if isinstance(c, dict) and c.get("id") not in ids_guardados
+    ]
+    return guardados + novos
 
 
 def _revert_unauthorized_fields(db, db_card, card, current_user):
@@ -56,8 +71,20 @@ def _revert_unauthorized_fields(db, db_card, card, current_user):
     if _norm(db_card.status) != _norm(card.status) and ("reordenar_cards" not in perms or moving_into_hidden_column):
         card.status = db_card.status
 
+    # `ordem` tem endpoint próprio protegido por reordenar_cards; deixá-la
+    # passar por aqui daria de graça exatamente o que aquele endpoint cobra.
+    if db_card.ordem != card.ordem and "reordenar_cards" not in perms:
+        card.ordem = db_card.ordem
+
     if sorted(db_card.responsaveis or []) != sorted(card.responsaveis or []) and "gerenciar_responsaveis" not in perms:
         card.responsaveis = db_card.responsaveis
+
+    # Comentários são append-only pra quem não pode editar o card: um modal
+    # desatualizado (ou um payload forjado com lista vazia) apagava a conversa
+    # inteira, e diff_comentarios só registra adições — sumia sem log nenhum.
+    card.comentarios = _merge_comentarios_for_permission(
+        db_card.comentarios, card.comentarios, can_edit="editar_card" in perms
+    )
 
     card.checklist = filter_checklist_for_permission(
         db_card.checklist, card.checklist,
@@ -226,7 +253,10 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
         db_card.prazo = card.prazo
         db_card.checklist = sanitized_checklist
         db_card.comentarios = card.comentarios
-        db_card.responsaveis = card.responsaveis if card.responsaveis else [card.autor]
+        # O fallback usa o autor GUARDADO, não o do payload: com `responsaveis`
+        # vazio, confiar no `autor` do cliente deixava qualquer um se colocar
+        # como responsável sem passar por gerenciar_responsaveis e sem log.
+        db_card.responsaveis = card.responsaveis if card.responsaveis else [db_card.autor]
         db_card.github_url = card.github_url or None
         db_card.ordem = card.ordem
         now_iso = datetime.now().isoformat()
@@ -282,6 +312,10 @@ def delete_card(card_id: str, db: Session = Depends(get_db), current_user: UserD
         db.delete(db_card)
         db.query(CardSeenDB).filter(CardSeenDB.card_id == card_id).delete()
         db.query(ItemSeenDB).filter(ItemSeenDB.card_id == card_id).delete()
+        # Anexo que sobrevive ao card vira órfão: a linha continua viva
+        # apontando pra um card inexistente, e o download passa a não ter como
+        # checar visibilidade. Some junto com o card, arquivo e tudo.
+        purgar_anexos_do_card(db, card_id)
         db.commit()
     return {"msg": "deletado"}
 

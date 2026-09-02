@@ -11,7 +11,9 @@ export default function NotasView({ user, allUsers, cards, openItemId, onOpenIte
   const [search, setSearch]         = useState('');
   const [loading, setLoading]       = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle');
-  const saveTimer = useRef(null);
+  // Um timer POR nota. Com um timer só, editar a nota B menos de 700ms depois
+  // da A cancelava o PUT pendente da A — a edição sumia e a UI dizia "Salvo".
+  const saveTimers = useRef({});
 
   // Fetch + pick the initial active note in one step: if we were told to open a
   // specific note (openItemId, from a "linked item" click elsewhere), honor that;
@@ -60,13 +62,18 @@ export default function NotasView({ user, allUsers, cards, openItemId, onOpenIte
 
   const updateNote = (changes) => {
     if (!activeId || !activeNote) return;
+    const noteId = activeId;  // fixa o alvo: activeId pode mudar antes do timer disparar
     const updated = { ...activeNote, ...changes };
-    setNotes(prev => prev.map(n => n.id === activeId ? updated : n));
+    setNotes(prev => prev.map(n => n.id === noteId ? updated : n));
     setSaveStatus('saving');
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      authFetch(`${API}/notes/${activeId}`, { method: 'PUT', body: JSON.stringify(updated) })
-        .then(() => { setSaveStatus('saved'); setTimeout(() => setSaveStatus('idle'), 2000); });
+    clearTimeout(saveTimers.current[noteId]);
+    saveTimers.current[noteId] = setTimeout(() => {
+      authFetch(`${API}/notes/${noteId}`, { method: 'PUT', body: JSON.stringify(updated) })
+        .then(() => {
+          delete saveTimers.current[noteId];
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 2000);
+        });
     }, 700);
   };
 

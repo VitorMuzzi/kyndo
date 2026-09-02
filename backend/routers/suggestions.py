@@ -138,16 +138,24 @@ def _apply_suggestion(db, db_card, campo_alvo, valor_proposto, usuario, autor_su
     return False, None
 
 
-def _revert_suggestion(db, db_card, campo_alvo, valor_anterior, usuario, autor_sugestao):
+def _revert_suggestion(db, db_card, campo_alvo, valor_anterior, usuario, autor_sugestao, valor_proposto=None):
     """Undoes a previously-applied suggestion — used when a decision that was
     'aceita' gets switched to something else. Mirrors _apply_suggestion but
-    restores valor_anterior instead of applying a new proposed value."""
+    restores valor_anterior instead of applying a new proposed value.
+
+    Só reverte se o campo ainda tiver o valor que a sugestão aplicou: se
+    alguém editou aquilo à mão depois da aceitação, restaurar cegamente o
+    valor_anterior apagaria a edição de terceiro sem aviso."""
     detalhe = f"revogou sugestão de {autor_sugestao}"
 
     if campo_alvo in SIMPLE_CARD_FIELDS_MAP:
         atual = getattr(db_card, campo_alvo) or ""
         anterior = valor_anterior or ""
         if atual == anterior:
+            return False
+        if valor_proposto is not None and atual != (valor_proposto or ""):
+            _mk_log(db, db_card.id, db_card.titulo, usuario, "sugestao_revogada_sem_reverter",
+                    detalhe=f"{campo_alvo} mudou depois da aceitação — valor atual mantido ({detalhe})")
             return False
         setattr(db_card, campo_alvo, valor_anterior)
         _mk_log(db, db_card.id, db_card.titulo, usuario, SIMPLE_CARD_FIELDS_MAP[campo_alvo], valor_antigo=atual, valor_novo=anterior, detalhe=detalhe)
@@ -160,6 +168,10 @@ def _revert_suggestion(db, db_card, campo_alvo, valor_anterior, usuario, autor_s
         if alvo is None:
             return False
         if (alvo.get("texto") or "") == (valor_anterior or ""):
+            return False
+        if valor_proposto is not None and (alvo.get("texto") or "") != (valor_proposto or ""):
+            _mk_log(db, db_card.id, db_card.titulo, usuario, "sugestao_revogada_sem_reverter",
+                    detalhe=f"etapa editada depois da aceitação — texto atual mantido ({detalhe})")
             return False
         nova_checklist = []
         for item in checklist:
@@ -196,7 +208,7 @@ def decide_suggestion(card_id: str, suggestion_id: str, body: SuggestionDecision
 
     # Leaving 'aceita' for something else undoes whatever field change was applied.
     if status_anterior == "aceita" and body.status != "aceita" and sugestao.campo_alvo and sugestao.valor_anterior is not None:
-        if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor):
+        if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor, sugestao.valor_proposto):
             meaningful = True
         sugestao.valor_anterior = None
 
@@ -237,7 +249,7 @@ def delete_suggestion(card_id: str, suggestion_id: str, db: Session = Depends(ge
 
     now_iso = datetime.now().isoformat()
     if sugestao.status == "aceita" and sugestao.campo_alvo and sugestao.valor_anterior is not None:
-        if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor):
+        if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor, sugestao.valor_proposto):
             _bump_card(db, db_card, card_id, current_user, now_iso)
 
     _mk_log(db, card_id, db_card.titulo, current_user.nome, "sugestao_apagada", detalhe=sugestao.texto[:200])

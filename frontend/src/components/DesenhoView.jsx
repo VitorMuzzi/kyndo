@@ -11,7 +11,9 @@ export default function DesenhoView({ user, allUsers, cards, openItemId, onOpenI
   const [loading, setLoading]       = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle');
   const canvasRef  = useRef(null);
-  const saveTimer  = useRef(null);
+  // Um timer POR desenho — mesmo bug que o NotasView tinha: um timer só fazia
+  // a troca rápida entre desenhos cancelar o PUT pendente do anterior.
+  const saveTimers = useRef({});
   const isDrawing  = useRef(false);
   const [tool, setTool]           = useState('pen');
   const [color, setColor]         = useState('#ffffff');
@@ -72,13 +74,18 @@ export default function DesenhoView({ user, allUsers, cards, openItemId, onOpenI
 
   const updateDrawing = (changes) => {
     if (!activeId || !activeDrawing) return;
+    const drawingId = activeId;  // fixa o alvo: activeId pode mudar antes do timer disparar
     const updated = { ...activeDrawing, ...changes };
-    setDrawings(prev => prev.map(d => d.id === activeId ? updated : d));
+    setDrawings(prev => prev.map(d => d.id === drawingId ? updated : d));
     setSaveStatus('saving');
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      authFetch(`${API}/drawings/${activeId}`, { method: 'PUT', body: JSON.stringify(updated) })
-        .then(() => { setSaveStatus('saved'); setTimeout(() => setSaveStatus('idle'), 2000); });
+    clearTimeout(saveTimers.current[drawingId]);
+    saveTimers.current[drawingId] = setTimeout(() => {
+      authFetch(`${API}/drawings/${drawingId}`, { method: 'PUT', body: JSON.stringify(updated) })
+        .then(() => {
+          delete saveTimers.current[drawingId];
+          setSaveStatus('saved');
+          setTimeout(() => setSaveStatus('idle'), 2000);
+        });
     }, 700);
   };
 

@@ -122,12 +122,21 @@ def diff_checklist(db, card_id, titulo, old_checklist, new_checklist, usuario):
 
 
 def diff_comentarios(db, card_id, titulo, old_comentarios, new_comentarios, usuario):
-    old_ids = {c["id"] for c in (old_comentarios or []) if isinstance(c, dict) and "id" in c}
+    old_by_id = {c["id"]: c for c in (old_comentarios or []) if isinstance(c, dict) and "id" in c}
+    new_ids = {c["id"] for c in (new_comentarios or []) if isinstance(c, dict) and "id" in c}
     meaningful = False
     for c in new_comentarios or []:
-        if isinstance(c, dict) and c.get("id") not in old_ids:
+        if isinstance(c, dict) and c.get("id") not in old_by_id:
             _mk_log(db, card_id, titulo, usuario, "comentario_adicionado", detalhe=c.get("texto"))
             meaningful = True
+    # Só quem tem editar_card chega aqui com comentário faltando (o router
+    # reverte os demais), mas mesmo essa pessoa não pode apagar conversa sem
+    # deixar rastro. Como na exclusão de etapa, é logado sem contar pro badge.
+    for cid, old in old_by_id.items():
+        if cid not in new_ids:
+            autor = old.get("autor") or "?"
+            _mk_log(db, card_id, titulo, usuario, "comentario_removido",
+                    detalhe=f"de {autor}: {old.get('texto')}")
     return meaningful
 
 

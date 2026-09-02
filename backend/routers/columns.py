@@ -31,7 +31,10 @@ def create_column(col: ColSchema, db: Session = Depends(get_db), current_user: U
 def update_column(col_id: str, col: ColSchema, db: Session = Depends(get_db), current_user: UserDB = Depends(require_permission("gerenciar_colunas"))):
     db_col = db.query(ColumnDB).filter(ColumnDB.id == col_id).first()
     if db_col:
-        for key, value in col.model_dump().items():
+        # O id vem no corpo só porque o ColSchema é compartilhado com o POST.
+        # Deixar ele passar aqui trocaria a chave primária da coluna e órfãria
+        # todo card cujo `status` aponta pra ela — não há FK que segure isso.
+        for key, value in col.model_dump(exclude={"id"}).items():
             setattr(db_col, key, value)
         db.commit()
     return {"msg": "atualizado"}
