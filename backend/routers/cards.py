@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, UserDB
-from schemas import CardReorderItem, CardSchema
-from security import get_current_user
+from schemas import CardMergeRequest, CardReorderItem, CardSchema
+from security import get_current_user, require_admin
 from audit import _mk_log, log_card_created, log_card_deleted, process_card_update
+from card_merge import CONFIRMACAO, confirmacao_valida, fundir_cards
 from rbac import filter_checklist_for_permission, get_user_permissions, get_visible_column_ids, require_permission
 
 router = APIRouter()
@@ -283,6 +284,42 @@ def delete_card(card_id: str, db: Session = Depends(get_db), current_user: UserD
         db.query(ItemSeenDB).filter(ItemSeenDB.card_id == card_id).delete()
         db.commit()
     return {"msg": "deletado"}
+
+
+@router.post("/cards/{card_id}/merge")
+def merge_card(card_id: str, req: CardMergeRequest, db: Session = Depends(get_db), current_user: UserDB = Depends(require_admin)):
+    """Funde `card_id` (a origem, que desaparece) no card `destino_id`.
+    Restrito a admin/superadmin e protegido por confirmação digitada — a
+    validação da palavra é feita aqui, não só na UI, porque a UI é só o
+    primeiro portão."""
+    if not confirmacao_valida(req.confirmacao):
+        raise HTTPException(status_code=400, detail=f'Digite "{CONFIRMACAO}" para confirmar a fusão')
+    if card_id == req.destino_id:
+        raise HTTPException(status_code=400, detail="Não dá para fundir um card nele mesmo")
+
+    origem = db.query(CardDB).filter(CardDB.id == card_id).first()
+    if not origem:
+        raise HTTPException(status_code=404, detail="Card de origem não encontrado")
+    destino = db.query(CardDB).filter(CardDB.id == req.destino_id).first()
+    if not destino:
+        raise HTTPException(status_code=404, detail="Card de destino não encontrado")
+
+    titulo_origem = origem.titulo
+    resumo = fundir_cards(db, origem, destino, current_user.nome)
+
+    # Quem fundiu acabou de ver o resultado — não deve pegar o próprio badge.
+    now_iso = datetime.now().isoformat()
+    seen_row = db.query(CardSeenDB).filter(
+        CardSeenDB.card_id == destino.id, CardSeenDB.user_id == current_user.id
+    ).first()
+    if seen_row:
+        seen_row.visto_em = now_iso
+        seen_row.visto_versao = destino.alteracoes
+    else:
+        db.add(CardSeenDB(card_id=destino.id, user_id=current_user.id, visto_em=now_iso, visto_versao=destino.alteracoes))
+
+    db.commit()
+    return {"ok": True, "destino_id": destino.id, "titulo_origem": titulo_origem, "resumo": resumo}
 
 
 @router.post("/cards/{card_id}/seen")

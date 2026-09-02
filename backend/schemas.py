@@ -50,6 +50,11 @@ class CardReorderItem(BaseModel):
     ordem: int
 
 
+class CardMergeRequest(BaseModel):
+    destino_id: str
+    confirmacao: str  # precisa ser "CONFIRMO" — validado no servidor, nunca só na UI
+
+
 class ShareEntry(BaseModel):
     user_id: str
     nivel: str  # 'ver' | 'editar'

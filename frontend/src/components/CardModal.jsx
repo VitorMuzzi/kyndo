@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat } from 'lucide-react';
+import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, hasPermission, autorRoleChips, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
 import SuggestionsSection from './SuggestionsSection.jsx';
 import AttachmentsSection from './AttachmentsSection.jsx';
 import GithubPrSection from './GithubPrSection.jsx';
+import MergeCardDialog from './MergeCardDialog.jsx';
 
-export default function CardModal({ card, col, allColumns, user, allUsers, allCards, onClose, onSave, onDelete, onOpenLinkedItem, onNavigateToCard }) {
+export default function CardModal({ card, col, allColumns, user, allUsers, allCards, onClose, onSave, onDelete, onOpenLinkedItem, onNavigateToCard, onMerged }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
   const [desc, setDesc] = useState(card?.descricao || '');
   const [checklist, setChecklist] = useState(card?.checklist || []);
@@ -28,6 +29,7 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
   const [prioridadeAberto, setPrioridadeAberto] = useState(false);
   const [githubMenuAberto, setGithubMenuAberto] = useState(false);
   const [githubUrlTemp, setGithubUrlTemp] = useState('');
+  const [mergeAberto, setMergeAberto] = useState(false);
   const [editingItemId, setEditingItemId] = useState(null);
   const [editingItemText, setEditingItemText] = useState('');
   const [expandedItemId, setExpandedItemId] = useState(null);
@@ -52,6 +54,10 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
   const canManageResponsaveis = hasPermission(user, 'gerenciar_responsaveis');
   const canDecideSugestoes = hasPermission(user, 'decidir_sugestoes');
   const isAuthor = card?.autor === user.nome;
+  // Fundir apaga um card inteiro e mexe em sete tabelas — fica no cargo mais
+  // forte do sistema, não numa permissão de cargo. O backend revalida.
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const podeFundir = isAdmin && card?.id && (allCards || []).some(c => c.id !== card.id);
 
   // Preserved exactly as before RBAC: authors keep self-service editing rights
   // in public columns / on their own new card, on top of whatever their cargos grant.
@@ -175,6 +181,18 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                       </div>
                       {githubUrl && (
                         <button onClick={() => { setGithubUrl(''); setGithubUrlTemp(''); setGithubMenuAberto(false); }} className="mt-2 text-[10px] text-red-400 hover:text-red-300 font-bold">Remover repositório</button>
+                      )}
+                      {podeFundir && (
+                        <>
+                          <div className="border-t border-slate-700 my-3"/>
+                          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Administração</p>
+                          <button
+                            onClick={() => { setGithubMenuAberto(false); setMergeAberto(true); }}
+                            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-amber-300 hover:bg-amber-500/10 transition-colors text-xs font-bold"
+                          >
+                            <Merge size={14}/> Fundir com outro cartão
+                          </button>
+                        </>
                       )}
                     </div>
                   </>
@@ -430,6 +448,16 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
           <button onClick={() => onSave({ ...card, titulo, descricao: desc, checklist, prioridade, comentarios, prazo, autor: card?.autor || user.nome, responsaveis, github_url: githubUrl, recorrente, recorrencia_dias: recorrente ? recorrenciaDias : null })} className="px-4 md:px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold text-xs md:text-sm shadow-lg hover:bg-emerald-700 transition-colors">Salvar Tudo</button>
         </div>
       </div>
+
+      {mergeAberto && (
+        <MergeCardDialog
+          card={card}
+          allCards={allCards}
+          allColumns={allColumns}
+          onCancel={() => setMergeAberto(false)}
+          onMerged={resultado => { setMergeAberto(false); onMerged?.(resultado); }}
+        />
+      )}
     </div>
   );
 }

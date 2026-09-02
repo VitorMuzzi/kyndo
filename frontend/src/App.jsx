@@ -334,7 +334,6 @@ export default function App() {
     }
   };
 
-  // Debounced column title update: update state immediately, delay API call
   const handleColTitleChange = (col, newTitle) => {
     setCols(prev => prev.map(c => c.id === col.id ? { ...c, titulo: newTitle } : c));
     clearTimeout(colTitleTimers.current[col.id]);
@@ -393,6 +392,15 @@ export default function App() {
           onDelete={id => authFetch(`${API}/cards/${id}`, { method: 'DELETE' }).then(() => { setModal(null); sync(); })}
           onOpenLinkedItem={openLinkedItem}
           onNavigateToCard={onNavigateToCard}
+          onMerged={async ({ destino_id }) => {
+            // O card aberto acabou de ser apagado no servidor — fecha antes de
+            // recarregar, senão o modal fica preso num card que não existe mais.
+            setModal(null);
+            syncBlockedUntil.current = 0;
+            await sync();
+            const destino = cardsRef.current[destino_id];
+            if (destino) setModal({ card: destino, status: destino.status });
+          }}
         />
       )}
 
