@@ -260,7 +260,11 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                 {githubMenuAberto && (
                   <>
                     <div className="fixed inset-0 z-[210]" onClick={() => setGithubMenuAberto(false)}/>
-                    <div className="absolute top-full mt-1 right-0 w-64 bg-slate-800 rounded-xl shadow-xl border border-slate-700 z-[220] p-3 animate-in fade-in zoom-in-95">
+                    {/* left-0, não right-0: este botão fica na borda ESQUERDA
+                        do modal, e ancorar pela direita jogava os 256px de
+                        largura pra fora, onde o overflow-hidden do modal
+                        cortava o menu. */}
+                    <div className="absolute top-full mt-1 left-0 w-64 bg-slate-800 rounded-xl shadow-xl border border-slate-700 z-[220] p-3 animate-in fade-in zoom-in-95">
                       <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Repositório GitHub</p>
                       <div className="flex gap-1.5">
                         <input autoFocus type="text" value={githubUrlTemp} onChange={e => setGithubUrlTemp(e.target.value)}
