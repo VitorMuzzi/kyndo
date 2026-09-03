@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge } from 'lucide-react';
+import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge, ListTree, Minus, Plus } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, hasPermission, autorRoleChips, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
@@ -7,6 +7,7 @@ import SuggestionsSection from './SuggestionsSection.jsx';
 import AttachmentsSection from './AttachmentsSection.jsx';
 import GithubPrSection from './GithubPrSection.jsx';
 import MergeCardDialog from './MergeCardDialog.jsx';
+import EtapasEditor from './EtapasEditor.jsx';
 
 export default function CardModal({ card, col, allColumns, user, allUsers, allCards, onClose, onSave, onDelete, onOpenLinkedItem, onNavigateToCard, onMerged }) {
   const [titulo, setTitulo] = useState(card?.titulo || '');
@@ -30,6 +31,41 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
   const [githubMenuAberto, setGithubMenuAberto] = useState(false);
   const [githubUrlTemp, setGithubUrlTemp] = useState('');
   const [mergeAberto, setMergeAberto] = useState(false);
+  const [organizando, setOrganizando] = useState(false);
+
+  // Etapas minimizadas ficam no navegador de cada pessoa, por card: é
+  // preferência de leitura, não dado do card — não faz sentido a minimização
+  // de um vazar pro outro nem ocupar tabela no servidor.
+  const chaveColapso = card?.id ? `kyndo_etapas_colapsadas_${card.id}` : null;
+  const [colapsadas, setColapsadas] = useState(() => {
+    if (!chaveColapso) return {};
+    try {
+      return JSON.parse(localStorage.getItem(chaveColapso) || '{}');
+    } catch {
+      return {};  // storage bloqueado ou JSON corrompido não pode derrubar o modal
+    }
+  });
+
+  const alternarColapso = (itemId) => {
+    setColapsadas(prev => {
+      const proximo = { ...prev, [itemId]: !prev[itemId] };
+      if (!proximo[itemId]) delete proximo[itemId];
+      try {
+        if (chaveColapso) localStorage.setItem(chaveColapso, JSON.stringify(proximo));
+      } catch { /* modo privado / storage cheio: minimiza só nesta sessão */ }
+      return proximo;
+    });
+  };
+
+  const definirColapsoDeTodas = (colapsar) => {
+    const proximo = colapsar
+      ? Object.fromEntries(checklist.filter(i => (i.subetapas || []).length > 0).map(i => [i.id, true]))
+      : {};
+    setColapsadas(proximo);
+    try {
+      if (chaveColapso) localStorage.setItem(chaveColapso, JSON.stringify(proximo));
+    } catch { /* idem */ }
+  };
   const [editingItemId, setEditingItemId] = useState(null);
   const [editingItemText, setEditingItemText] = useState('');
   const [expandedItemId, setExpandedItemId] = useState(null);
@@ -87,6 +123,21 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
   const novoId = (prefixo) => `${prefixo}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const addSubtarefa = () => { if (!novaSubtarefa.trim() || !canManageEtapas) return; setChecklist([...checklist, { id: novoId('sub'), texto: novaSubtarefa, concluido: false, criador: user.nome }]); setNovaSubtarefa(''); };
   const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: novoId('msg'), autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
+
+  const temSubetapas = checklist.some(i => (i.subetapas || []).length > 0);
+
+  // Abre/fecha o painel de observações da etapa e, ao abrir, marca a
+  // observação como vista. Extraído porque tanto o chevron quanto o losango
+  // de "tem observação" disparam a mesma coisa.
+  const alternarObservacoes = (item) => {
+    const abrindo = expandedItemId !== item.id;
+    setExpandedItemId(abrindo ? item.id : null);
+    setNovaSubetapa('');
+    if (abrindo && item.notas_nao_vista && card?.id) {
+      authFetch(`${API}/cards/${card.id}/items/${item.id}/seen`, { method: 'POST' });
+      setChecklist(cl => cl.map(i => i.id === item.id ? { ...i, notas_nao_vista: false } : i));
+    }
+  };
 
   const percentual = checklist.length > 0 ? Math.round(
     checklist.reduce((acc, item) => {
@@ -218,18 +269,62 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
           {mostrarEtapas && (
             <>
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-slate-300 font-bold text-sm"><CheckSquare size={16}/> Etapas</div>
-                  {checklist.length > 0 && <span className="text-sm font-bold text-slate-400">{percentual}%</span>}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-slate-300 font-bold text-sm shrink-0"><CheckSquare size={16}/> Etapas</div>
+                  <div className="flex items-center gap-1 min-w-0">
+                    {temSubetapas && !organizando && (
+                      <>
+                        <button onClick={() => definirColapsoDeTodas(true)} title="Minimizar todas"
+                          className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+                          <Minus size={13}/>
+                        </button>
+                        <button onClick={() => definirColapsoDeTodas(false)} title="Expandir todas"
+                          className="p-1 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors">
+                          <Plus size={13}/>
+                        </button>
+                      </>
+                    )}
+                    {canManageEtapas && !organizando && checklist.length > 0 && (
+                      <button onClick={() => setOrganizando(true)} title="Reordenar, indentar, renomear e excluir etapas"
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors">
+                        <ListTree size={13}/> Editar
+                      </button>
+                    )}
+                    {checklist.length > 0 && <span className="text-sm font-bold text-slate-400 ml-1 shrink-0">{percentual}%</span>}
+                  </div>
                 </div>
                 {checklist.length > 0 && <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full transition-all duration-300 ${percentual === 100 ? 'bg-emerald-500' : 'bg-teal-500'}`} style={{ width: `${percentual}%` }}/></div>}
+                {organizando ? (
+                  <EtapasEditor
+                    checklist={checklist}
+                    novoId={novoId}
+                    usuario={user.nome}
+                    onCancelar={() => setOrganizando(false)}
+                    onAplicar={nova => { setChecklist(nova); setOrganizando(false); }}
+                  />
+                ) : (
                 <div className="space-y-1">
                   {checklist.map(item => {
                     const subetapas = item.subetapas || [];
                     const isExpanded = expandedItemId === item.id;
+                    const colapsada = !!colapsadas[item.id];
+                    const concluidasSub = subetapas.filter(s => s.concluido).length;
+                    const temObservacao = !!(item.notas || '').trim();
                     return (
                       <div key={item.id} id={`etapa-${item.id}`} className="mb-1">
                         <div className="flex items-center gap-2 group/item">
+                          {/* Dobrar as filhas. Só aparece quando existem — e é
+                              separado do chevron da direita, que abre as
+                              observações, pra não virar dois botões iguais. */}
+                          {subetapas.length > 0 ? (
+                            <button onClick={() => alternarColapso(item.id)}
+                              title={colapsada ? 'Expandir sub-etapas' : 'Minimizar sub-etapas'}
+                              className="shrink-0 -ml-1 p-0.5 text-slate-500 hover:text-emerald-400 transition-colors">
+                              {colapsada ? <ChevronRight size={13}/> : <ChevronDown size={13}/>}
+                            </button>
+                          ) : (
+                            <span className="shrink-0 -ml-1 w-[21px]"/>
+                          )}
                           <button disabled={!canCompleteEtapas} onClick={() => { const nowDone = !item.concluido; setChecklist(checklist.map(i => i.id === item.id ? { ...i, concluido: nowDone, concluidoPor: nowDone ? user.nome : null, subetapas: nowDone ? (i.subetapas||[]).map(s => ({...s, concluido: true, concluidoPor: user.nome})) : (i.subetapas||[]) } : i)); }} className={`${!canCompleteEtapas ? 'cursor-default' : 'cursor-pointer hover:scale-110 transition-transform'} shrink-0`}>
                             {item.concluido ? <CheckCircle2 size={16} className="text-emerald-500"/> : <Circle size={16} className="text-slate-600"/>}
                           </button>
@@ -239,19 +334,28 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                             <span className={`flex-1 min-w-0 text-sm ${item.concluido ? 'text-slate-500 line-through' : 'text-slate-200'} ${canManageEtapas ? 'cursor-pointer hover:text-emerald-400' : ''}`} onClick={() => { if (canManageEtapas) { setEditingItemId(item.id); setEditingItemText(item.texto); } }}>{item.texto}</span>
                           )}
                           <div className="flex items-center gap-1 shrink-0">
+                            {/* Escondeu as filhas: mostra quantas e quantas
+                                estão prontas, senão minimizar cega você. */}
+                            {colapsada && (
+                              <button onClick={() => alternarColapso(item.id)} title="Expandir sub-etapas"
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors">
+                                {concluidasSub}/{subetapas.length}
+                              </button>
+                            )}
                             {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
                               ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>
                               : <>{item.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(item.criador)}`}>{item.criador}</span>}{item.concluido && item.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(item.concluidoPor)}`}>✓ {item.concluidoPor}</span>}</>}
-                            {canManageEtapas && <button onClick={() => setChecklist(checklist.filter(i => i.id !== item.id))} className="opacity-0 group-hover/item:opacity-100 p-0.5 text-red-400 hover:text-red-300 transition-all"><X size={14}/></button>}
-                            <button onClick={() => {
-                              const abrindo = !isExpanded;
-                              setExpandedItemId(abrindo ? item.id : null);
-                              setNovaSubetapa('');
-                              if (abrindo && item.notas_nao_vista && card?.id) {
-                                authFetch(`${API}/cards/${card.id}/items/${item.id}/seen`, { method: 'POST' });
-                                setChecklist(cl => cl.map(i => i.id === item.id ? { ...i, notas_nao_vista: false } : i));
-                              }
-                            }} className="relative p-0.5 text-slate-500 hover:text-emerald-400 transition-colors">
+                            {/* Excluir vive só no modo Editar: aqui um X ao
+                                lado da caixa de concluir é clique errado
+                                fácil de dar, e etapa apagada não volta. */}
+                            {temObservacao && (
+                              <button onClick={() => alternarObservacoes(item)}
+                                title="Esta etapa tem observações"
+                                className={`text-[11px] leading-none px-0.5 transition-colors ${isExpanded ? 'text-amber-300' : 'text-amber-400 hover:text-amber-300'}`}>
+                                ◆
+                              </button>
+                            )}
+                            <button onClick={() => alternarObservacoes(item)} className="relative p-0.5 text-slate-500 hover:text-emerald-400 transition-colors">
                               {item.notas_nao_vista && !isExpanded && (
                                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full ring-1 ring-slate-900 animate-pulse" title="Nova observação nesta etapa"/>
                               )}
@@ -270,7 +374,7 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                             )}
                           </div>
                         )}
-                        {subetapas.length > 0 && (
+                        {subetapas.length > 0 && !colapsada && (
                           <div className="ml-7 pl-3 mt-1 border-l-2 border-slate-700 space-y-1">
                             {subetapas.map(sub => (
                               <div key={sub.id} className="flex items-center gap-2 group/sub">
@@ -286,7 +390,7 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                                   {sub.concluido && sub.concluidoPor && sub.concluidoPor === sub.criador
                                     ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>
                                     : <>{sub.criador && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${userColor(sub.criador)}`}>{sub.criador}</span>}{sub.concluido && sub.concluidoPor && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ring-1 ring-emerald-400 ${userColor(sub.concluidoPor)}`}>✓ {sub.concluidoPor}</span>}</>}
-                                  {canManageEtapas && <button onClick={() => setChecklist(checklist.map(i => i.id === item.id ? {...i, subetapas: (i.subetapas||[]).filter(s => s.id !== sub.id)} : i))} className="opacity-0 group-hover/sub:opacity-100 p-0.5 text-red-400 hover:text-red-300 transition-all"><X size={14}/></button>}
+                                  {/* Idem: sub-etapa também só se exclui no modo Editar. */}
                                 </div>
                               </div>
                             ))}
@@ -296,7 +400,8 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                     );
                   })}
                 </div>
-                {canManageEtapas && (
+                )}
+                {canManageEtapas && !organizando && (
                   <div className="flex flex-row items-center gap-2 pt-2 w-full">
                     <input value={novaSubtarefa} onChange={e => setNovaSubtarefa(e.target.value)} onKeyDown={e => e.key === 'Enter' && addSubtarefa()} className="flex-grow min-w-0 p-2 bg-slate-800 text-slate-100 border border-slate-700 rounded-lg text-sm outline-none focus:border-emerald-400" placeholder="Adicionar etapa..."/>
                     <button onClick={addSubtarefa} className="shrink-0 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold shadow-md">Add</button>
