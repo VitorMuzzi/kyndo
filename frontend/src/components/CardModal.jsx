@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge, ListTree, Minus, Plus } from 'lucide-react';
+import { X, AlignLeft, CheckSquare, Circle, CheckCircle2, Tag, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge, ListTree, Minus, Plus, Eye, EyeOff } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, hasPermission, autorRoleChips, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
@@ -45,6 +45,27 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
       return {};  // storage bloqueado ou JSON corrompido não pode derrubar o modal
     }
   });
+
+  // Ao contrário da minimização (que é por card), ocultar concluídas é jeito
+  // de ler: quem gosta, gosta em todo card. Por isso é uma chave só, global.
+  const CHAVE_OCULTAR = 'kyndo_ocultar_etapas_concluidas';
+  const [ocultarConcluidas, setOcultarConcluidas] = useState(() => {
+    try {
+      return localStorage.getItem(CHAVE_OCULTAR) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const alternarOcultarConcluidas = () => {
+    setOcultarConcluidas(prev => {
+      const proximo = !prev;
+      try {
+        localStorage.setItem(CHAVE_OCULTAR, proximo ? '1' : '0');
+      } catch { /* storage bloqueado: vale só nesta sessão */ }
+      return proximo;
+    });
+  };
 
   const alternarColapso = (itemId) => {
     setColapsadas(prev => {
@@ -125,6 +146,23 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
   const addComentario = () => { if (!novoComentario.trim()) return; const dataAtual = new Date().toLocaleDateString('pt-BR', { hour: '2-digit', minute: '2-digit' }); setComentarios([...comentarios, { id: novoId('msg'), autor: user.nome, texto: novoComentario, data: dataAtual }]); setNovoComentario(''); };
 
   const temSubetapas = checklist.some(i => (i.subetapas || []).length > 0);
+
+  // Uma etapa concluída sai inteira; uma etapa em aberto fica, mas perde as
+  // sub-etapas já feitas. No modo Editar nada é ocultado — não se organiza o
+  // que não está na tela. A porcentagem segue contando tudo, oculto incluído,
+  // porque ela é progresso real, não o que está visível.
+  const ocultando = ocultarConcluidas && !organizando;
+  const checklistVisivel = ocultando
+    ? checklist
+        .filter(i => !i.concluido)
+        .map(i => ({ ...i, subetapas: (i.subetapas || []).filter(s => !s.concluido) }))
+    : checklist;
+
+  const ocultasEtapas = checklist.filter(i => i.concluido).length;
+  const ocultasSubetapas = checklist
+    .filter(i => !i.concluido)
+    .reduce((acc, i) => acc + (i.subetapas || []).filter(s => s.concluido).length, 0);
+  const totalOcultas = ocultasEtapas + ocultasSubetapas;
 
   // Abre/fecha o painel de observações da etapa e, ao abrir, marca a
   // observação como vista. Extraído porque tanto o chevron quanto o losango
@@ -272,6 +310,13 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-slate-300 font-bold text-sm shrink-0"><CheckSquare size={16}/> Etapas</div>
                   <div className="flex items-center gap-1 min-w-0">
+                    {!organizando && checklist.some(i => i.concluido || (i.subetapas || []).some(s => s.concluido)) && (
+                      <button onClick={alternarOcultarConcluidas}
+                        title={ocultarConcluidas ? 'Mostrar etapas concluídas' : 'Ocultar etapas concluídas'}
+                        className={`p-1 rounded-lg transition-colors ${ocultarConcluidas ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'}`}>
+                        {ocultarConcluidas ? <EyeOff size={13}/> : <Eye size={13}/>}
+                      </button>
+                    )}
                     {temSubetapas && !organizando && (
                       <>
                         <button onClick={() => definirColapsoDeTodas(true)} title="Minimizar todas"
@@ -304,11 +349,17 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                   />
                 ) : (
                 <div className="space-y-1">
-                  {checklist.map(item => {
+                  {checklistVisivel.map(item => {
+                    // `item` pode estar filtrado (sub-etapas concluídas
+                    // removidas). O contador da linha minimizada tem que sair
+                    // do item COMPLETO, senão ele mostra "0/3" pra uma etapa
+                    // que na verdade tem 2 de 5 prontas.
+                    const itemCompleto = checklist.find(i => i.id === item.id) || item;
                     const subetapas = item.subetapas || [];
+                    const subetapasTotais = itemCompleto.subetapas || [];
                     const isExpanded = expandedItemId === item.id;
                     const colapsada = !!colapsadas[item.id];
-                    const concluidasSub = subetapas.filter(s => s.concluido).length;
+                    const concluidasSub = subetapasTotais.filter(s => s.concluido).length;
                     const temObservacao = !!(item.notas || '').trim();
                     return (
                       <div key={item.id} id={`etapa-${item.id}`} className="mb-1">
@@ -339,7 +390,7 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                             {colapsada && (
                               <button onClick={() => alternarColapso(item.id)} title="Expandir sub-etapas"
                                 className="text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-slate-800 text-slate-400 hover:text-emerald-400 transition-colors">
-                                {concluidasSub}/{subetapas.length}
+                                {concluidasSub}/{subetapasTotais.length}
                               </button>
                             )}
                             {item.concluido && item.concluidoPor && item.concluidoPor === item.criador
@@ -399,6 +450,18 @@ export default function CardModal({ card, col, allColumns, user, allUsers, allCa
                       </div>
                     );
                   })}
+                  {/* Estado escondido tem que se anunciar, senão você olha uma
+                      lista curta e acha que perdeu etapa. */}
+                  {ocultando && totalOcultas > 0 && (
+                    <button onClick={alternarOcultarConcluidas}
+                      className="w-full flex items-center justify-center gap-1.5 mt-2 py-1.5 rounded-lg text-[10px] font-bold text-slate-500 hover:text-emerald-400 hover:bg-slate-800/60 transition-colors">
+                      <Eye size={12}/>
+                      {ocultasEtapas > 0 && `${ocultasEtapas} etapa${ocultasEtapas !== 1 ? 's' : ''}`}
+                      {ocultasEtapas > 0 && ocultasSubetapas > 0 && ' e '}
+                      {ocultasSubetapas > 0 && `${ocultasSubetapas} sub-etapa${ocultasSubetapas !== 1 ? 's' : ''}`}
+                      {' '}concluída{totalOcultas !== 1 ? 's' : ''} oculta{totalOcultas !== 1 ? 's' : ''} · mostrar
+                    </button>
+                  )}
                 </div>
                 )}
                 {canManageEtapas && !organizando && (
