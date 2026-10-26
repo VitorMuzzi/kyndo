@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _db_path = os.path.join(tempfile.gettempdir(), f"kyndo_test_{uuid.uuid4().hex}.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_db_path}"
 os.environ["SECRET_KEY"] = "t" * 64
+# Sem isso o load_dotenv do main.py puxaria a senha real do backend/.env.
+os.environ["SUPERADMIN_PASSWORD"] = "admin"
 os.environ["UPLOAD_DIR"] = os.path.join(tempfile.gettempdir(), f"kyndo_test_uploads_{uuid.uuid4().hex}")
 
 import pytest

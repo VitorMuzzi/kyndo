@@ -64,6 +64,42 @@ def sanitize_checklist(raw_checklist, old_checklist):
     return result
 
 
+def _carimbar_no(no, antigo, usuario):
+    no["criador"] = antigo.get("criador") if antigo else usuario
+    if no.get("concluido"):
+        ja_estava = antigo is not None and antigo.get("concluido")
+        no["concluidoPor"] = antigo.get("concluidoPor") if ja_estava else usuario
+    else:
+        no["concluidoPor"] = None
+    return no
+
+
+def carimbar_autoria_checklist(checklist, old_checklist, usuario):
+    """criador e concluidoPor nunca vêm do cliente: etapa nova é de quem está
+    logado, etapa que acabou de ser concluída foi concluída por quem está
+    logado, e o resto mantém o que já estava gravado. Sem isso dava pra criar
+    ou concluir etapa "como" outra pessoa só editando o payload. Procura o
+    antigo por id em qualquer nível, porque etapa vira sub-etapa e vice-versa."""
+    antigos = {}
+    for item in old_checklist or []:
+        if isinstance(item, dict) and "id" in item:
+            antigos[item["id"]] = item
+            for s in item.get("subetapas") or []:
+                if isinstance(s, dict) and "id" in s:
+                    antigos[s["id"]] = s
+
+    result = []
+    for item in checklist or []:
+        if isinstance(item, dict):
+            item = _carimbar_no(dict(item), antigos.get(item.get("id")), usuario)
+            item["subetapas"] = [
+                _carimbar_no(dict(s), antigos.get(s.get("id")), usuario) if isinstance(s, dict) else s
+                for s in (item.get("subetapas") or [])
+            ]
+        result.append(item)
+    return result
+
+
 def _flatten_niveis(checklist):
     """{id: (nivel, item, id_do_pai)} cobrindo os dois níveis. Serve pra
     distinguir uma etapa que foi INDENTADA (mudou de nível) de uma que foi
@@ -245,7 +281,9 @@ def process_card_update(db, db_card, new, usuario):
     `meaningful` is False when the only checklist changes were deletions —
     those are logged but must not trigger the home-screen "unseen" badge."""
     titulo_ref = new.titulo or db_card.titulo
-    sanitized_checklist = sanitize_checklist(new.checklist, db_card.checklist)
+    sanitized_checklist = carimbar_autoria_checklist(
+        sanitize_checklist(new.checklist, db_card.checklist), db_card.checklist, usuario
+    )
     meaningful = diff_card_fields(db, db_card, new, usuario, titulo_ref)
     if diff_checklist(db, db_card.id, titulo_ref, db_card.checklist, sanitized_checklist, usuario):
         meaningful = True

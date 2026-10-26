@@ -83,15 +83,16 @@ def test_only_owner_can_delete(client, maria, joao):
     assert r.status_code == 200
 
 
-def test_public_note_visible_via_linked_card_responsavel(client, maria, joao):
+def test_public_note_visible_via_linked_card_responsavel(client, admin_token, maria, joao):
     r = client.post(
         "/cards",
         json={"titulo": "Tarefa", "status": "col-1", "autor": maria["nome"],
               "responsaveis": [maria["nome"], joao["nome"]]},
-        headers=auth(maria["token"]),
+        headers=auth(admin_token),
     )
     assert r.status_code == 200, r.text
     card = r.json()
+    assert card["responsaveis"] == [maria["nome"], joao["nome"]]
 
     note = _create_note(client, maria["token"], publico=True, card_id=card["id"])
     assert note["id"] in _note_ids(client, joao["token"])

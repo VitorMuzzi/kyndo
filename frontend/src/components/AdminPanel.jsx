@@ -44,7 +44,11 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
 
   const deletarUsuario = async (id) => {
     if (!window.confirm('Certeza que deseja excluir este usuário?')) return;
-    await authFetch(`${API}/users/${id}`, { method: 'DELETE' });
+    const res = await authFetch(`${API}/users/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setMsg(`Erro: ${data.detail || 'não foi possível excluir'}`);
+    }
     refreshUsers();
   };
 

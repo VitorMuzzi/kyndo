@@ -25,5 +25,5 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         "role": user.role,
         "permissions": sorted(get_user_permissions(db, user.id)),
         "senha_temporaria": user.senha_temporaria,
-        "token": create_access_token(user.id),
+        "token": create_access_token(user),
     }

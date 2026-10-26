@@ -10,6 +10,7 @@ class UserDB(Base):
     senha = Column(String)
     role = Column(String)
     senha_temporaria = Column(Boolean, default=False)
+    senha_versao = Column(Integer, default=0)  # sobe a cada troca de senha; token com versão diferente é recusado
 
 
 class ColumnDB(Base):

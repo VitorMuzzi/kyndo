@@ -11,7 +11,7 @@ from database import get_db
 from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, SuggestionDB, UserDB
 from schemas import CardMergeRequest, CardReorderItem, CardSchema
 from security import get_current_user, require_admin
-from audit import _mk_log, log_card_created, log_card_deleted, process_card_update
+from audit import _mk_log, carimbar_autoria_checklist, log_card_created, log_card_deleted, process_card_update
 from card_merge import CONFIRMACAO, confirmacao_valida, fundir_cards
 from rbac import filter_checklist_for_permission, get_user_permissions, get_visible_column_ids, require_permission
 
@@ -43,6 +43,17 @@ def _merge_comentarios_for_permission(old_comentarios, new_comentarios, can_edit
         if isinstance(c, dict) and c.get("id") not in ids_guardados
     ]
     return guardados + novos
+
+
+def _carimbar_comentarios(old_comentarios, new_comentarios, usuario):
+    """O autor de um comentário nunca vem do cliente: comentário novo é de
+    quem está logado, e os que já existiam mantêm o autor gravado — senão
+    dava pra comentar "como" outra pessoa, ou reescrever quem disse o quê."""
+    autores = {c.get("id"): c.get("autor") for c in (old_comentarios or []) if isinstance(c, dict)}
+    return [
+        {**c, "autor": autores[c.get("id")] if c.get("id") in autores else usuario} if isinstance(c, dict) else c
+        for c in (new_comentarios or [])
+    ]
 
 
 def _revert_unauthorized_fields(db, db_card, card, current_user):
@@ -83,8 +94,10 @@ def _revert_unauthorized_fields(db, db_card, card, current_user):
     # Comentários são append-only pra quem não pode editar o card: um modal
     # desatualizado (ou um payload forjado com lista vazia) apagava a conversa
     # inteira, e diff_comentarios só registra adições — sumia sem log nenhum.
-    card.comentarios = _merge_comentarios_for_permission(
-        db_card.comentarios, card.comentarios, can_edit="editar_card" in perms
+    card.comentarios = _carimbar_comentarios(
+        db_card.comentarios,
+        _merge_comentarios_for_permission(db_card.comentarios, card.comentarios, can_edit="editar_card" in perms),
+        current_user.nome,
     )
 
     card.checklist = filter_checklist_for_permission(
@@ -155,7 +168,7 @@ def _apply_due_recurrences(db):
         return
     for card in due:
         card.checklist = _reset_checklist_progress(card.checklist)
-        dias = card.recorrencia_dias or 1
+        dias = max(1, card.recorrencia_dias or 1)  # linha antiga com valor inválido não pode travar o loop abaixo
         if card.recorrencia_coluna_reset and db.query(ColumnDB).filter(ColumnDB.id == card.recorrencia_coluna_reset).first():
             card.status = card.recorrencia_coluna_reset
         proximo = datetime.fromisoformat(card.recorrencia_proximo_reset)
@@ -212,19 +225,24 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
     data_atual = now.strftime("%d/%m/%Y")
     now_iso = now.isoformat()
     max_ordem = db.query(CardDB).filter(CardDB.status == card.status).count()
-    recorrente = bool(card.recorrente and card.recorrencia_dias)
+    # Mesmas regras da edição: recorrência exige gerenciar_etapas e escolher
+    # responsáveis exige gerenciar_responsaveis — criar não pode ser a porta
+    # dos fundos do que editar cobra.
+    recorrente = bool(card.recorrente and card.recorrencia_dias) and "gerenciar_etapas" in perms
+    responsaveis = card.responsaveis if (card.responsaveis and "gerenciar_responsaveis" in perms) else [current_user.nome]
     novo = CardDB(
         id=f"card-{uuid.uuid4().hex[:8]}",
         titulo=card.titulo,
         descricao=card.descricao,
         status=card.status,
         prioridade=card.prioridade,
-        autor=card.autor,
+        # Autoria é sempre de quem está logado, nunca do payload.
+        autor=current_user.nome,
         prazo=card.prazo,
         data_criacao=data_atual,
-        checklist=card.checklist,
-        comentarios=card.comentarios,
-        responsaveis=card.responsaveis if card.responsaveis else [card.autor],
+        checklist=carimbar_autoria_checklist(card.checklist, None, current_user.nome),
+        comentarios=_carimbar_comentarios(None, card.comentarios, current_user.nome),
+        responsaveis=responsaveis,
         github_url=card.github_url or None,
         ordem=max_ordem,
         updated_em=now_iso,

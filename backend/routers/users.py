@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import RoleDB, UserDB, UserRoleDB
-from rbac import get_user_permissions, require_permission
+from rbac import get_user_permissions, is_superadmin, require_permission
 from schemas import PasswordUpdate, UserCreate
-from security import get_current_user, get_password_hash
+from security import create_access_token, definir_senha, get_current_user, get_password_hash
 
 router = APIRouter()
 
@@ -52,6 +52,13 @@ def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: Us
 def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(require_permission("excluir_usuarios"))):
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if user and user.nome != "admin":
+        # excluir_usuarios não pode virar atalho pra derrubar quem está acima:
+        # só superadmin remove superadmin, e o último nunca sai.
+        if is_superadmin(db, user):
+            if not is_superadmin(db, current_user):
+                raise HTTPException(status_code=403, detail="Só um Superadmin pode excluir outro Superadmin")
+            if sum(1 for u in db.query(UserDB).all() if is_superadmin(db, u)) <= 1:
+                raise HTTPException(status_code=400, detail="Não é possível excluir o único Superadmin do sistema")
         db.delete(user)
         db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).delete()
         db.commit()
@@ -65,7 +72,18 @@ def update_password(user_id: str, req: PasswordUpdate, db: Session = Depends(get
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    user.senha = get_password_hash(req.nova_senha)
-    user.senha_temporaria = False
+    propria = current_user.id == user_id
+    # Trocar a senha do superadmin e logar como ele seria uma escalada completa
+    # pra quem só recebeu trocar_senha_outros.
+    if not propria and is_superadmin(db, user) and not is_superadmin(db, current_user):
+        raise HTTPException(status_code=403, detail="Só um Superadmin pode alterar a senha de outro Superadmin")
+    definir_senha(user, req.nova_senha)
+    # Senha definida por outra pessoa é conhecida por ela — o dono troca no próximo login.
+    user.senha_temporaria = not propria
     db.commit()
-    return {"msg": "senha atualizada"}
+    resposta = {"msg": "senha atualizada"}
+    if propria:
+        # A troca invalidou o token desta sessão também; devolve um novo pra
+        # quem acabou de trocar não ser jogado pra fora.
+        resposta["token"] = create_access_token(user)
+    return resposta

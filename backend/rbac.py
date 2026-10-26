@@ -37,6 +37,16 @@ def get_user_permissions(db: Session, user_id: str) -> set:
     return perms
 
 
+def is_superadmin(db: Session, user) -> bool:
+    """Superadmin é quem tem o cargo protegido — ou o papel legado
+    'superadmin' que o init_data dá ao usuário admin."""
+    if user.role == "superadmin":
+        return True
+    return db.query(UserRoleDB).join(RoleDB, RoleDB.id == UserRoleDB.role_id).filter(
+        UserRoleDB.user_id == user.id, RoleDB.protegido == True,  # noqa: E712
+    ).first() is not None
+
+
 def require_permission(key: str):
     def dependency(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
         if key not in get_user_permissions(db, current_user.id):

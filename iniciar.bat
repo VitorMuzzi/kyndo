@@ -44,7 +44,7 @@ echo.
 echo    Backend  (API) : http://localhost:8095
 echo    Frontend (Web) : http://localhost:5176
 echo    Acesso na rede : http://10.1.1.61:5176
-echo    Login padrao   : admin / admin
+echo    Login admin    : senha em SUPERADMIN_PASSWORD (backend\.env)
 echo.
 echo Pode FECHAR esta janela - os servidores continuam rodando.
 echo Para encerrar de fato os servidores, use parar.bat.

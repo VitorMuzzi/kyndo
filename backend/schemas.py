@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
@@ -42,7 +42,9 @@ class CardSchema(BaseModel):
     github_url: Optional[str] = ""
     ordem: int = 0
     recorrente: bool = False
-    recorrencia_dias: Optional[int] = None
+    # Sem limite, um valor <= 0 punha _apply_due_recurrences em loop infinito
+    # (o próximo vencimento nunca passava de agora) e travava o GET /cards.
+    recorrencia_dias: Optional[int] = Field(None, ge=1, le=3650)
 
 
 class CardReorderItem(BaseModel):

@@ -42,10 +42,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user: UserDB) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=7)
-    to_encode = {"sub": user_id, "exp": expire}
+    to_encode = {"sub": user.id, "exp": expire, "sv": user.senha_versao or 0}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def definir_senha(user: UserDB, nova_senha: str):
+    """Troca a senha e invalida todo token emitido antes — senão quem já
+    estava logado com a senha antiga (ou um token vazado) continua dentro
+    pelos 7 dias inteiros."""
+    user.senha = get_password_hash(nova_senha)
+    user.senha_versao = (user.senha_versao or 0) + 1
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
@@ -62,6 +70,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=401, detail="Usuário não encontrado")
+    # Token sem "sv" (emitido antes desta checagem existir) conta como versão 0:
+    # só cai quando a senha for trocada pela primeira vez.
+    if (payload.get("sv") or 0) != (user.senha_versao or 0):
+        raise HTTPException(status_code=401, detail="Sessão expirada — a senha foi alterada")
     return user
 
 

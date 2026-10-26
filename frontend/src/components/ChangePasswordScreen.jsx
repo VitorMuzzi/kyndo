@@ -17,7 +17,12 @@ export default function ChangePasswordScreen({ user, onPasswordChanged }) {
         method: 'PUT',
         body: JSON.stringify({ nova_senha: novaSenha }),
       });
-      if (res.ok) { onPasswordChanged(); }
+      if (res.ok) {
+        // Trocar a senha invalida o token antigo — o servidor devolve um novo.
+        const data = await res.json();
+        if (data.token) sessionStorage.setItem('demandaflow_token', data.token);
+        onPasswordChanged();
+      }
       else { setErro('Erro ao alterar a senha.'); }
     } catch {
       setErro('Erro de conexão.');

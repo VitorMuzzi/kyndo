@@ -276,3 +276,156 @@ def test_reverting_suggestion_still_works_when_untouched(client, admin_token, ma
                  json={"status": "rejeitada", "motivo_recusa": "nao"},
                  headers=auth(admin_token))
     assert _get_card(client, admin_token, card["id"])["titulo"] == "Antes"
+
+
+# --- senha padrão do admin ---------------------------------------------------
+
+def _admin_db():
+    from database import SessionLocal
+    from models import UserDB
+    db = SessionLocal()
+    return db, db.query(UserDB).filter(UserDB.nome == "admin").first()
+
+
+def test_init_db_marks_default_admin_password_as_temporary(client, admin_token, monkeypatch):
+    from init_data import init_db
+    monkeypatch.delenv("SUPERADMIN_PASSWORD", raising=False)
+    init_db()
+    db, admin = _admin_db()
+    try:
+        assert admin.senha_temporaria is True
+    finally:
+        admin.senha_temporaria = False
+        db.commit()
+        db.close()
+
+
+def test_init_db_replaces_default_admin_password_with_env(client, admin_token, monkeypatch):
+    from init_data import init_db
+    from security import get_password_hash, verify_password
+    db, admin = _admin_db()
+    versao_original = admin.senha_versao or 0
+    db.close()
+
+    monkeypatch.setenv("SUPERADMIN_PASSWORD", "senha-do-env")
+    init_db()
+    db, admin = _admin_db()
+    try:
+        assert verify_password("senha-do-env", admin.senha)
+        assert admin.senha_temporaria is False
+    finally:
+        # Devolve o admin como estava: admin_token é da sessão inteira de testes.
+        admin.senha = get_password_hash("admin")
+        admin.senha_versao = versao_original
+        db.commit()
+        db.close()
+
+
+# --- recorrência com dias <= 0 travava o GET /cards em loop infinito ---------
+
+def test_recurrence_days_must_be_positive(client, admin_token):
+    for dias in (-1, 0):
+        r = client.post("/cards", json={"titulo": "Loop", "status": "col-1", "autor": "admin",
+                                        "recorrente": True, "recorrencia_dias": dias}, headers=auth(admin_token))
+        assert r.status_code == 422, r.text
+    assert client.get("/cards", headers=auth(admin_token)).status_code == 200
+
+
+def test_creating_recurring_card_requires_gerenciar_etapas(client, maria):
+    card = _create_card(client, maria["token"], maria["nome"], recorrente=True, recorrencia_dias=7)
+    assert card["recorrente"] is False
+    assert card["recorrencia_proximo_reset"] is None
+
+
+# --- superadmin protegido de trocar_senha_outros / excluir_usuarios ----------
+
+def test_superadmin_protected_from_lower_roles(client, admin_token):
+    chefe = create_user(client, admin_token, "chefe_super")
+    rh = create_user(client, admin_token, "rh_senhas")
+    roles = {r["nome"]: r for r in client.get("/roles", headers=auth(admin_token)).json()}
+    cargo_rh = client.post("/roles", json={"nome": "RH Senhas", "permissoes": {
+        "trocar_senha_outros": True, "excluir_usuarios": True}}, headers=auth(admin_token)).json()
+    assert client.put(f"/users/{rh['id']}/roles", json={"role_ids": [cargo_rh["id"]]},
+                      headers=auth(admin_token)).status_code == 200
+    assert client.put(f"/users/{chefe['id']}/roles", json={"role_ids": [roles["Superadmin"]["id"]]},
+                      headers=auth(admin_token)).status_code == 200
+    try:
+        r = client.put(f"/users/{chefe['id']}/password", json={"nova_senha": "tomada"}, headers=auth(rh["token"]))
+        assert r.status_code == 403
+        r = client.delete(f"/users/{chefe['id']}", headers=auth(rh["token"]))
+        assert r.status_code == 403
+        assert client.post("/login", json={"nome": "chefe_super", "senha": "senha123"}).status_code == 200
+
+        # Com quem não é superadmin a permissão continua funcionando.
+        comum = create_user(client, admin_token, "comum_senha")
+        r = client.put(f"/users/{comum['id']}/password", json={"nova_senha": "outra"}, headers=auth(rh["token"]))
+        assert r.status_code == 200
+    finally:
+        client.put(f"/users/{chefe['id']}/roles", json={"role_ids": []}, headers=auth(admin_token))
+        client.delete(f"/users/{chefe['id']}", headers=auth(admin_token))
+        client.delete(f"/users/{rh['id']}", headers=auth(admin_token))
+        client.delete(f"/roles/{cargo_rh['id']}", headers=auth(admin_token))
+
+
+# --- trocar senha derruba as sessões antigas -------------------------------
+
+def test_password_change_invalidates_old_tokens(client, admin_token):
+    pessoa = create_user(client, admin_token, "sessao_derrubada")
+    token_antigo = pessoa["token"]
+    r = client.put(f"/users/{pessoa['id']}/password", json={"nova_senha": "nova123"}, headers=auth(token_antigo))
+    assert r.status_code == 200
+    token_novo = r.json()["token"]
+
+    assert client.get("/cards", headers=auth(token_antigo)).status_code == 401
+    assert client.get("/cards", headers=auth(token_novo)).status_code == 200
+
+
+def test_password_reset_by_someone_else_is_temporary(client, admin_token):
+    pessoa = create_user(client, admin_token, "reset_por_admin")
+    r = client.put(f"/users/{pessoa['id']}/password", json={"nova_senha": "nova123"}, headers=auth(pessoa["token"]))
+    assert client.post("/login", json={"nome": "reset_por_admin", "senha": "nova123"}).json()["senha_temporaria"] is False
+
+    r = client.put(f"/users/{pessoa['id']}/password", json={"nova_senha": "do-admin"}, headers=auth(admin_token))
+    assert r.status_code == 200
+    assert "token" not in r.json()
+    assert client.post("/login", json={"nome": "reset_por_admin", "senha": "do-admin"}).json()["senha_temporaria"] is True
+
+
+# --- autoria nunca vem do payload ------------------------------------------
+
+def test_card_authorship_comes_from_logged_user(client, maria):
+    card = _create_card(
+        client, maria["token"], "admin",
+        responsaveis=["admin"],
+        comentarios=[{"id": "c-falso", "autor": "admin", "texto": "fui eu?", "data": "x"}],
+        checklist=[{"id": "e-falsa", "texto": "etapa", "concluido": True, "concluidoPor": "admin",
+                    "criador": "admin", "subetapas": []}],
+    )
+    assert card["autor"] == maria["nome"]
+    assert card["responsaveis"] == [maria["nome"]]
+    assert card["comentarios"][0]["autor"] == maria["nome"]
+    assert card["checklist"][0]["criador"] == maria["nome"]
+    assert card["checklist"][0]["concluidoPor"] == maria["nome"]
+
+
+def test_comment_and_step_authorship_preserved_on_edit(client, admin_token, maria):
+    card = _create_card(
+        client, maria["token"], maria["nome"],
+        comentarios=[{"id": "c-1", "autor": maria["nome"], "texto": "oi", "data": "x"}],
+        checklist=[{"id": "e-1", "texto": "etapa", "concluido": False, "criador": maria["nome"], "subetapas": [
+            {"id": "s-1", "texto": "sub", "concluido": False, "criador": maria["nome"]}]}],
+    )
+    r = _put(
+        client, admin_token, card,
+        comentarios=[{"id": "c-1", "autor": "joao", "texto": "oi", "data": "x"},
+                     {"id": "c-2", "autor": maria["nome"], "texto": "novo", "data": "x"}],
+        checklist=[{"id": "e-1", "texto": "etapa", "concluido": False, "criador": "joao", "subetapas": [
+            {"id": "s-1", "texto": "sub", "concluido": True, "concluidoPor": "joao", "criador": "joao"}]}],
+    )
+    assert r.status_code == 200, r.text
+    salvo = _get_card(client, admin_token, card["id"])
+    assert {c["id"]: c["autor"] for c in salvo["comentarios"]} == {"c-1": maria["nome"], "c-2": "admin"}
+    etapa = salvo["checklist"][0]
+    assert etapa["criador"] == maria["nome"]
+    assert etapa["subetapas"][0]["criador"] == maria["nome"]
+    assert etapa["subetapas"][0]["concluidoPor"] == "admin"

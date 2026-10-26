@@ -78,6 +78,7 @@ def _run_schema_migrations():
         "ALTER TABLE cards ADD COLUMN recorrencia_dias INTEGER",
         "ALTER TABLE cards ADD COLUMN recorrencia_coluna_reset VARCHAR",
         "ALTER TABLE cards ADD COLUMN recorrencia_proximo_reset VARCHAR",
+        "ALTER TABLE users ADD COLUMN senha_versao INTEGER DEFAULT 0",
     ]:
         with engine.connect() as conn:
             try:
