@@ -9,11 +9,14 @@ import LoginScreen from './components/LoginScreen.jsx';
 import ChangePasswordScreen from './components/ChangePasswordScreen.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import ListActionsMenu from './components/ListActionsMenu.jsx';
-import CardModal from './components/CardModal.jsx';
+import CardPage from './components/CardPage.jsx';
+import CronometroFlutuante from './components/CronometroFlutuante.jsx';
+import { buscarCronometroAtual, pararCronometro } from './cronometro.js';
 import CronogramaView from './components/CronogramaView.jsx';
 import NotasView from './components/NotasView.jsx';
 import DesenhoView from './components/DesenhoView.jsx';
 import DashboardView from './components/DashboardView.jsx';
+import GestaoView from './components/GestaoView.jsx';
 import SearchModal from './components/SearchModal.jsx';
 
 export default function App() {
@@ -26,6 +29,7 @@ export default function App() {
   const [cols, setCols]   = useState([]);
   const [cards, setCards] = useState({});
   const [modal, setModal] = useState(null);
+  const [cronometro, setCronometro] = useState(null);  // o cronômetro em andamento de quem está logado
   const [activeMenu, setActiveMenu]     = useState(null);
   const [isSyncing, setIsSyncing]       = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -58,15 +62,30 @@ export default function App() {
   // page was open before the site. isPopStateNav guards against feeding our own
   // pushState calls back into another pushState when restoring from popstate.
   const isPopStateNav = useRef(false);
+  // Card com alteração não salva deixa aqui uma função que pergunta antes de
+  // sair; estadoHistorico é a entrada do histórico que está na tela agora.
+  const guardaSaidaCard = useRef(null);
+  const estadoHistorico = useRef(null);
   useEffect(() => {
     if (currentScreen !== 'board') return;
-    history.replaceState({ view: activeView, cardId: null }, '');
+    estadoHistorico.current = { view: activeView, cardId: null };
+    history.replaceState(estadoHistorico.current, '');
     const onPopState = (e) => {
-      isPopStateNav.current = true;
       const state = e.state || {};
-      setActiveView(state.view || 'board');
-      const card = state.cardId ? cardsRef.current[state.cardId] : null;
-      setModal(card ? { card, status: card.status } : null);
+      const aplicar = () => {
+        setActiveView(state.view || 'board');
+        const card = state.cardId ? cardsRef.current[state.cardId] : null;
+        setModal(card ? { card, status: card.status } : null);
+      };
+      if (guardaSaidaCard.current) {
+        // O navegador já saiu da entrada do card: devolve ela e deixa o card
+        // perguntar. Se a pessoa confirmar, a troca entra como navegação nova.
+        history.pushState(estadoHistorico.current, '');
+        guardaSaidaCard.current(aplicar);
+        return;
+      }
+      isPopStateNav.current = true;
+      aplicar();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -75,8 +94,9 @@ export default function App() {
   const modalNavKey = modal ? (modal.card?.id ?? 'new') : null;
   useEffect(() => {
     if (currentScreen !== 'board') return;
+    estadoHistorico.current = { view: activeView, cardId: modal?.card?.id ?? null };
     if (isPopStateNav.current) { isPopStateNav.current = false; return; }
-    history.pushState({ view: activeView, cardId: modal?.card?.id ?? null }, '');
+    history.pushState(estadoHistorico.current, '');
   }, [activeView, modalNavKey, currentScreen]);
 
   // Ctrl+K / Cmd+K to open search
@@ -126,6 +146,9 @@ export default function App() {
         cardsRef.current = map;
         setCards(map);
       }
+      // O cronômetro pode ter sido ligado/desligado em outra aba ou máquina.
+      const atual = await buscarCronometroAtual();
+      if (atual !== undefined) setCronometro(atual);
     } catch (e) { console.error('sync error', e); }
     finally { setTimeout(() => setIsSyncing(false), 500); }
   };
@@ -184,11 +207,13 @@ export default function App() {
 
   const handleLogout = () => {
     setUser(null);
+    setCronometro(null);
     sessionStorage.removeItem('demandaflow_user');
     sessionStorage.removeItem('demandaflow_token');
     setCurrentScreen('login');
   };
 
+  // Resolve true quando o servidor aceitou e o card fechou; false se não salvou.
   const handleSaveCard = (d) => {
     let finalStatus   = modal.status;
     let finalPriority = d.prioridade;
@@ -211,20 +236,21 @@ export default function App() {
     const method  = d.id ? 'PUT' : 'POST';
     const url     = d.id ? `${API}/cards/${d.id}` : `${API}/cards`;
     const payload = { ...d, status: finalStatus, prioridade: finalPriority };
-    authFetch(url, { method, body: JSON.stringify(payload) }).then(async res => {
+    return authFetch(url, { method, body: JSON.stringify(payload) }).then(async res => {
       // Fechar o modal sem olhar o status jogava fora tudo que a pessoa
       // digitou quando o servidor recusava (403 ao criar em coluna privada,
       // por exemplo) — e sem nenhuma mensagem. Erro mantém o modal aberto.
       if (!res.ok) {
         const corpo = await res.json().catch(() => ({}));
         alert(corpo.detail || 'Não foi possível salvar. Nada foi perdido — tente de novo.');
-        return;
+        return false;
       }
       if (method === 'PUT')
         setCards(prev => prev[d.id] ? { ...prev, [d.id]: { ...prev[d.id], ...payload } } : prev);
       setModal(null);
       sync();
-    }).catch(() => alert('Falha de conexão com o servidor. Nada foi salvo.'));
+      return true;
+    }).catch(() => { alert('Falha de conexão com o servidor. Nada foi salvo.'); return false; });
   };
 
   const onDragStart = () => { isDragging.current = true; };
@@ -406,10 +432,10 @@ export default function App() {
       )}
 
       {modal && (
-        <CardModal
+        <CardPage
           // Sem key, navegar de card pra card (menção @[card:...], Cronograma,
           // Dashboard, busca, botão voltar) reaproveita a mesma instância — e
-          // o CardModal semeia todo o estado editável em inicializadores
+          // o CardPage semeia todo o estado editável em inicializadores
           // useState, que só rodam na montagem. O título/descrição/checklist do
           // card anterior ficavam no estado e "Salvar Tudo" gravava o conteúdo
           // de um card em cima do outro. A key força a remontagem.
@@ -433,6 +459,9 @@ export default function App() {
           }).catch(() => alert('Falha de conexão com o servidor.'))}
           onOpenLinkedItem={openLinkedItem}
           onNavigateToCard={onNavigateToCard}
+          cronometro={cronometro}
+          onCronometroChange={setCronometro}
+          guardaSaidaRef={guardaSaidaCard}
           onMerged={async ({ destino_id }) => {
             // O card aberto acabou de ser apagado no servidor — fecha antes de
             // recarregar, senão o modal fica preso num card que não existe mais.
@@ -444,6 +473,12 @@ export default function App() {
           }}
         />
       )}
+
+      <CronometroFlutuante
+        cronometro={cronometro}
+        onAbrirCard={onNavigateToCard}
+        onParar={() => pararCronometro().then(() => setCronometro(null)).catch(e => alert(e.message))}
+      />
 
       {/* Header trigger zone */}
       {!headerPinned && (
@@ -485,6 +520,7 @@ export default function App() {
               { key: 'notas',      label: 'Notas' },
               { key: 'desenho',    label: 'Desenho' },
               { key: 'dashboard',  label: 'Dashboard' },
+              ...(hasPermission(user, 'acessar_gestao') ? [{ key: 'gestao', label: 'Gestão' }] : []),
             ].map(v => (
               <button key={v.key} onClick={() => setActiveView(v.key)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeView === v.key ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow' : 'text-white hover:bg-white/10'}`}>
@@ -588,6 +624,11 @@ export default function App() {
       {activeView === 'dashboard' && (
         <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
           <DashboardView cardsById={cards} setModal={setModal} />
+        </div>
+      )}
+      {activeView === 'gestao' && hasPermission(user, 'acessar_gestao') && (
+        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+          <GestaoView onAbrirCard={onNavigateToCard} allUsers={allUsers} />
         </div>
       )}
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Share2 } from 'lucide-react';
+import LixeiraPessoal from './LixeiraPessoal.jsx';
 import { API, authFetch } from '../api.js';
 import { DRAW_W, DRAW_H, DRAW_COLORS, DRAW_SIZES } from '../constants.jsx';
 import ShareControls from './ShareControls.jsx';
@@ -97,6 +98,15 @@ export default function DesenhoView({ user, allUsers, cards, openItemId, onOpenI
     authFetch(`${API}/drawings/${id}`, { method: 'DELETE' });
   };
 
+  // Desenho recuperado da lixeira: recarrega a lista e já abre ele.
+  const aoRecuperar = (drawingId) => {
+    authFetch(`${API}/drawings`).then(r => r.ok ? r.json() : null).then(data => {
+      if (!data) return;
+      setDrawings(data);
+      if (data.some(d => d.id === drawingId)) setActiveId(drawingId);
+    });
+  };
+
   const filtered = drawings.filter(d => d.titulo?.toLowerCase().includes(search.toLowerCase()));
 
   const getPos = (e) => {
@@ -192,8 +202,9 @@ export default function DesenhoView({ user, allUsers, cards, openItemId, onOpenI
             </div>
           ))}
         </div>
-        <div className="p-3 border-t border-white/10 shrink-0">
+        <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
           <button onClick={createDrawing} className="w-full py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors">+ Novo desenho</button>
+          <LixeiraPessoal tipo="desenho" onRecuperado={aoRecuperar}/>
         </div>
       </aside>
 

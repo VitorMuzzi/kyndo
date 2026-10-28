@@ -79,6 +79,12 @@ def _run_schema_migrations():
         "ALTER TABLE cards ADD COLUMN recorrencia_coluna_reset VARCHAR",
         "ALTER TABLE cards ADD COLUMN recorrencia_proximo_reset VARCHAR",
         "ALTER TABLE users ADD COLUMN senha_versao INTEGER DEFAULT 0",
+        "ALTER TABLE audit_log ADD COLUMN alvo_tipo VARCHAR",
+        "ALTER TABLE audit_log ADD COLUMN alvo_id VARCHAR",
+        "ALTER TABLE audit_log ADD COLUMN reversao TEXT",
+        "ALTER TABLE audit_log ADD COLUMN lixeira_id VARCHAR",
+        "ALTER TABLE audit_log ADD COLUMN revertido_em VARCHAR",
+        "ALTER TABLE audit_log ADD COLUMN revertido_por VARCHAR",
     ]:
         with engine.connect() as conn:
             try:
@@ -226,6 +232,22 @@ def _backfill_ver_etapas_permission():
         db.close()
 
 
+def _sync_superadmin_permissions():
+    """O Superadmin é semeado com todas as permissões que existiam naquele
+    momento, e o cargo é protegido (não dá pra editar pela tela). Sem isso,
+    toda permissão criada depois — como ver_tempo_equipe — ficaria fora do
+    alcance dele para sempre."""
+    db = SessionLocal()
+    try:
+        for role in db.query(RoleDB).filter(RoleDB.protegido == True).all():  # noqa: E712
+            perms = role.permissoes or {}
+            if not all(perms.get(k) for k in PERMISSIONS):
+                role.permissoes = {**perms, **{k: True for k in PERMISSIONS}}
+        db.commit()
+    finally:
+        db.close()
+
+
 def run_migrations():
     _migrate_drawings_table()
     Base.metadata.create_all(bind=engine)
@@ -235,3 +257,4 @@ def run_migrations():
     _backfill_item_notifications()
     _seed_default_roles()
     _backfill_ver_etapas_permission()
+    _sync_superadmin_permissions()

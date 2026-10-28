@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from attachment_storage import MAX_UPLOAD_BYTES, UPLOAD_DIR
 from audit import _mk_log
 from database import get_db
+from lixeira import excluir_linha
 from models import AttachmentDB, CardDB, UserDB
 from rbac import get_user_permissions, get_visible_column_ids
 from security import get_current_user
@@ -81,7 +82,8 @@ async def upload_attachment(card_id: str, file: UploadFile = File(...), db: Sess
         enviado_por=current_user.nome, enviado_em=now_iso,
     )
     db.add(nova)
-    _mk_log(db, card_id, db_card.titulo, current_user.nome, "anexo_adicionado", detalhe=nova.nome_original)
+    _mk_log(db, card_id, db_card.titulo, current_user.nome, "anexo_adicionado", detalhe=nova.nome_original,
+            reversao={"anexo_id": nova.id})
     db.commit()
     db.refresh(nova)
     return _serialize(nova)
@@ -118,10 +120,11 @@ def delete_attachment(attachment_id: str, db: Session = Depends(get_db), current
     if a.enviado_por != current_user.nome and "editar_card" not in perms:
         raise HTTPException(status_code=403, detail="Sem permissão para excluir este anexo")
 
-    path = os.path.join(UPLOAD_DIR, a.nome_arquivo)
-    if os.path.isfile(path):
-        os.remove(path)
-    _mk_log(db, a.card_id, db_card.titulo, current_user.nome, "anexo_removido", detalhe=a.nome_original)
-    db.delete(a)
+    # O arquivo fica no disco até a lixeira expirar; sem a linha em
+    # AttachmentDB o download já não o encontra.
+    nome = a.nome_original
+    lixeira_id = excluir_linha(db, "anexo", a, current_user.nome)
+    _mk_log(db, db_card.id, db_card.titulo, current_user.nome, "anexo_removido", detalhe=nome,
+            lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id})
     db.commit()
     return {"ok": True}

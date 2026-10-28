@@ -6,9 +6,10 @@ from datetime import datetime
 
 from models import (
     AttachmentDB, AuditLogDB, CardDB, CardSeenDB, DrawingDB,
-    ItemSeenDB, SuggestionDB, UserNoteDB,
+    ItemSeenDB, SuggestionDB, TimeEntryDB, UserNoteDB,
 )
 from audit import _mk_log
+from lixeira import linha_para_dict
 
 # Palavra que o admin precisa digitar. Comparada em maiúsculas e sem espaços
 # nas pontas — a fricção pretendida é ter que digitar a palavra, não acertar
@@ -16,6 +17,17 @@ from audit import _mk_log
 CONFIRMACAO = "CONFIRMO"
 
 SEPARADOR = "─" * 24
+
+# Campos do destino que a fusão pode mexer — fotografados antes e depois pra
+# que desfazer a fusão devolva o destino exatamente como era.
+CAMPOS_DESTINO = (
+    "descricao", "prazo", "github_url", "checklist", "comentarios", "responsaveis",
+    "recorrente", "recorrencia_dias", "recorrencia_coluna_reset", "recorrencia_proximo_reset",
+)
+
+
+def campos_destino(card):
+    return {c: getattr(card, c) for c in CAMPOS_DESTINO}
 
 
 def confirmacao_valida(texto: str) -> bool:
@@ -121,6 +133,25 @@ def fundir_cards(db, origem: CardDB, destino: CardDB, usuario: str):
     agora = datetime.now()
     agora_iso = agora.isoformat()
 
+    # Fotografia pra desfazer: a origem inteira, o destino antes, e quais
+    # linhas de outras tabelas a fusão vai mover.
+    def _ids(model):
+        return [r.id for r in db.query(model).filter(model.card_id == origem.id).all()]
+
+    reversao = {
+        "origem": linha_para_dict(origem),
+        "destino_id": destino.id,
+        "destino_antes": campos_destino(destino),
+        "movidos": {
+            "anexos": _ids(AttachmentDB), "sugestoes": _ids(SuggestionDB),
+            "notas": _ids(UserNoteDB), "desenhos": _ids(DrawingDB), "logs": _ids(AuditLogDB),
+            "tempo": [{"id": r.id, "item_id": r.item_id}
+                      for r in db.query(TimeEntryDB).filter(TimeEntryDB.card_id == origem.id).all()],
+        },
+        "card_seen": [linha_para_dict(r) for r in db.query(CardSeenDB).filter(CardSeenDB.card_id == origem.id).all()],
+        "item_seen": [linha_para_dict(r) for r in db.query(ItemSeenDB).filter(ItemSeenDB.card_id == origem.id).all()],
+    }
+
     # --- campos de vaga única: destino manda, origem preenche o que está vazio
     herdados = []
     if not (destino.prazo or "").strip() and (origem.prazo or "").strip():
@@ -164,8 +195,10 @@ def fundir_cards(db, origem: CardDB, destino: CardDB, usuario: str):
         {DrawingDB.card_id: destino.id}, synchronize_session=False)
     # card_titulo fica como estava de propósito: é o nome que o card tinha na
     # hora do evento, e reescrever isso falsificaria o histórico.
+    # alvo_id guarda de qual card o registro veio: reversao.py não deixa
+    # desfazê-lo no destino (aplicaria o histórico da origem em outro card).
     n_log = db.query(AuditLogDB).filter(AuditLogDB.card_id == origem.id).update(
-        {AuditLogDB.card_id: destino.id}, synchronize_session=False)
+        {AuditLogDB.card_id: destino.id, AuditLogDB.alvo_id: origem.id}, synchronize_session=False)
 
     # --- estado de "lido" por etapa acompanha a etapa (com o id já remapeado)
     for row in db.query(ItemSeenDB).filter(ItemSeenDB.card_id == origem.id).all():
@@ -180,6 +213,14 @@ def fundir_cards(db, origem: CardDB, destino: CardDB, usuario: str):
                               user_id=row.user_id, visto_versao=row.visto_versao))
         db.delete(row)
 
+    # --- tempo trabalhado vai junto, apontando pra etapa com o id remapeado
+    n_tempo = 0
+    for row in db.query(TimeEntryDB).filter(TimeEntryDB.card_id == origem.id).all():
+        row.card_id = destino.id
+        if row.item_id:
+            row.item_id = remap.get(row.item_id, row.item_id)
+        n_tempo += 1
+
     # O "lido" do card em si não migra: a fusão é uma mudança que todo mundo
     # precisa enxergar como não vista no destino.
     db.query(CardSeenDB).filter(CardSeenDB.card_id == origem.id).delete(synchronize_session=False)
@@ -192,6 +233,7 @@ def fundir_cards(db, origem: CardDB, destino: CardDB, usuario: str):
         "notas": n_notas,
         "desenhos": n_desenhos,
         "eventos_log": n_log,
+        "registros_tempo": n_tempo,
     }
 
     detalhe = (
@@ -199,8 +241,9 @@ def fundir_cards(db, origem: CardDB, destino: CardDB, usuario: str):
         f"{resumo['anexos']} anexo(s), {resumo['sugestoes']} sugestão(ões), "
         f"{resumo['notas']} anotação(ões), {resumo['desenhos']} desenho(s)"
     )
+    reversao["destino_depois"] = campos_destino(destino)
     _mk_log(db, destino.id, destino.titulo, usuario, "card_fundido",
-            valor_antigo=origem.titulo, valor_novo=destino.titulo, detalhe=detalhe)
+            valor_antigo=origem.titulo, valor_novo=destino.titulo, detalhe=detalhe, reversao=reversao)
 
     # A fusão conta como alteração para todo mundo, menos para quem a fez.
     destino.alteracoes = (destino.alteracoes or 0) + 1

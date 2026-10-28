@@ -5,7 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from audit import _mk_log
 from database import get_db
+from lixeira import excluir_linha
 from models import CardDB, UserDB, UserNoteDB
 from permissions import check_share_fields_change, compute_permission
 from schemas import UserNoteSchema
@@ -85,6 +87,10 @@ def delete_note(note_id: str, current_user: UserDB = Depends(get_current_user), 
         raise HTTPException(status_code=404, detail="Nota não encontrada")
     if db_note.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Apenas o dono pode deletar esta nota")
-    db.delete(db_note)
+    # Vai pra lixeira do dono. No log entra só o título — o conteúdo é pessoal.
+    titulo = db_note.titulo
+    lixeira_id = excluir_linha(db, "nota", db_note, current_user.nome)
+    _mk_log(db, None, titulo, current_user.nome, "nota_excluida", alvo_tipo="nota", alvo_id=db_note.id,
+            lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id})
     db.commit()
     return {"ok": True}

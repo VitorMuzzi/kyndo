@@ -76,6 +76,31 @@ class AuditLogDB(Base):
     valor_novo = Column(String, nullable=True)
     detalhe = Column(String, nullable=True)
     data = Column(String)
+    # O que o registro alterou fora de card (nota, usuário, cargo...); nulo = card.
+    alvo_tipo = Column(String, nullable=True)
+    alvo_id = Column(String, nullable=True, index=True)
+    # Dados pra desfazer a alteração — ver reversao.py. Nulo em registros
+    # antigos e nos que são só informativos.
+    reversao = Column(JSON, nullable=True)
+    lixeira_id = Column(String, nullable=True, index=True)
+    revertido_em = Column(String, nullable=True)
+    revertido_por = Column(String, nullable=True)
+
+
+class LixeiraDB(Base):
+    """Tudo que é excluído vem pra cá com uma fotografia completa (linha
+    principal e o que depende dela) e fica recuperável por PRAZO_DIAS — ver
+    lixeira.py. Recuperar apaga a linha daqui; expirar também, de vez."""
+    __tablename__ = "lixeira"
+    id = Column(String, primary_key=True, index=True)
+    tipo = Column(String, index=True)  # card, anexo, sugestao, nota, desenho, usuario, cargo, tempo
+    alvo_id = Column(String, index=True)
+    titulo = Column(String, default="")
+    card_id = Column(String, nullable=True, index=True)  # card a que o item pertencia, quando pertence
+    dono_id = Column(String, nullable=True, index=True)  # dono de nota/desenho — recupera pela própria lixeira
+    dados = Column(JSON)
+    excluido_por = Column(String)
+    excluido_em = Column(String, index=True)
 
 
 class RoleDB(Base):
@@ -123,6 +148,19 @@ class AttachmentDB(Base):
     tamanho = Column(Integer)
     enviado_por = Column(String)
     enviado_em = Column(String)
+
+
+class TimeEntryDB(Base):
+    """Um intervalo de trabalho cronometrado num card. fim nulo = cronômetro
+    rodando; cada pessoa tem no máximo um rodando por vez."""
+    __tablename__ = "time_entries"
+    id = Column(String, primary_key=True, index=True)
+    card_id = Column(String, index=True)
+    item_id = Column(String, nullable=True)  # etapa/sub-etapa do checklist, opcional
+    user_id = Column(String, index=True)
+    usuario = Column(String)  # nome na hora do registro, pra exibir sem join
+    inicio = Column(String)
+    fim = Column(String, nullable=True)
 
 
 class NoteDB(Base):

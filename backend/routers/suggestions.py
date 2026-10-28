@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from audit import SIMPLE_CARD_FIELDS_MAP, _mk_log
 from database import get_db
+from lixeira import excluir_linha
 from models import CardDB, CardSeenDB, SuggestionDB, UserDB
 from rbac import get_visible_column_ids, require_permission
 from schemas import SuggestionCreate, SuggestionDecision
@@ -52,6 +53,27 @@ def _serialize(s: SuggestionDB):
     }
 
 
+CAMPOS_DECISAO = ("status", "decidido_por", "decidido_em", "prazo_entrega", "motivo_recusa", "valor_anterior")
+
+
+def decisao_de(s: SuggestionDB):
+    return {c: getattr(s, c) for c in CAMPOS_DECISAO}
+
+
+def apagar_sugestao(db, sugestao, db_card, usuario):
+    """Apagar uma sugestão aceita desfaz o que ela aplicou (se ninguém mexeu
+    no campo depois). Vai pra lixeira; devolve (lixeira_id, reverteu_campo).
+    Não faz commit."""
+    reverteu = False
+    if sugestao.status == "aceita" and sugestao.campo_alvo and sugestao.valor_anterior is not None:
+        reverteu = _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, usuario, sugestao.autor, sugestao.valor_proposto)
+    texto = sugestao.texto[:200]
+    lixeira_id = excluir_linha(db, "sugestao", sugestao, usuario)
+    _mk_log(db, db_card.id, db_card.titulo, usuario, "sugestao_apagada", detalhe=texto,
+            lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id, "reverteu": reverteu})
+    return lixeira_id, reverteu
+
+
 def _bump_card(db, db_card, card_id, current_user, now_iso):
     db_card.alteracoes = (db_card.alteracoes or 0) + 1
     db_card.updated_em = now_iso
@@ -92,7 +114,8 @@ def create_suggestion(card_id: str, body: SuggestionCreate, db: Session = Depend
     )
     db.add(nova)
     _bump_card(db, db_card, card_id, current_user, now_iso)
-    _mk_log(db, card_id, db_card.titulo, current_user.nome, "sugestao_criada", detalhe=f"{body.identificacao.strip()}: {body.texto[:180]}")
+    _mk_log(db, card_id, db_card.titulo, current_user.nome, "sugestao_criada", detalhe=f"{body.identificacao.strip()}: {body.texto[:180]}",
+            reversao={"sug_id": nova.id})
     db.commit()
     db.refresh(nova)
     return _serialize(nova)
@@ -129,7 +152,8 @@ def _apply_suggestion(db, db_card, campo_alvo, valor_proposto, usuario, autor_su
         for item in checklist:
             item = dict(item)
             if item.get("id") == item_id:
-                _mk_log(db, db_card.id, db_card.titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=item.get("texto"), valor_novo=valor_proposto)
+                _mk_log(db, db_card.id, db_card.titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=item.get("texto"), valor_novo=valor_proposto,
+                        reversao={"item_id": item_id, "antes": item.get("texto"), "depois": valor_proposto})
                 item["texto"] = valor_proposto
             nova_checklist.append(item)
         db_card.checklist = nova_checklist  # reassign whole list — JSON column isn't Mutable-tracked
@@ -177,7 +201,8 @@ def _revert_suggestion(db, db_card, campo_alvo, valor_anterior, usuario, autor_s
         for item in checklist:
             item = dict(item)
             if item.get("id") == item_id:
-                _mk_log(db, db_card.id, db_card.titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=item.get("texto"), valor_novo=valor_anterior)
+                _mk_log(db, db_card.id, db_card.titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=item.get("texto"), valor_novo=valor_anterior,
+                        reversao={"item_id": item_id, "antes": item.get("texto"), "depois": valor_anterior})
                 item["texto"] = valor_anterior
             nova_checklist.append(item)
         db_card.checklist = nova_checklist
@@ -203,20 +228,22 @@ def decide_suggestion(card_id: str, suggestion_id: str, body: SuggestionDecision
     _assert_card_visible(db, current_user, db_card)
 
     status_anterior = sugestao.status
+    decisao_antes = decisao_de(sugestao)
     now_iso = datetime.now().isoformat()
     meaningful = False
+    aplicou = reverteu = False
 
     # Leaving 'aceita' for something else undoes whatever field change was applied.
     if status_anterior == "aceita" and body.status != "aceita" and sugestao.campo_alvo and sugestao.valor_anterior is not None:
         if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor, sugestao.valor_proposto):
-            meaningful = True
+            meaningful = reverteu = True
         sugestao.valor_anterior = None
 
     # Entering 'aceita' from anything else applies the proposed value.
     if body.status == "aceita" and status_anterior != "aceita" and sugestao.campo_alvo:
         changed, old_val = _apply_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_proposto, current_user.nome, sugestao.autor)
         if changed:
-            meaningful = True
+            meaningful = aplicou = True
             sugestao.valor_anterior = old_val
 
     if meaningful:
@@ -232,7 +259,10 @@ def decide_suggestion(card_id: str, suggestion_id: str, body: SuggestionDecision
         sugestao.motivo_recusa = body.motivo_recusa.strip()
         sugestao.prazo_entrega = None
     detalhe = sugestao.texto[:200] if status_anterior == "pendente" else f"decisão alterada de {status_anterior} para {body.status} — {sugestao.texto[:180]}"
-    _mk_log(db, card_id, db_card.titulo, current_user.nome, f"sugestao_{body.status}", detalhe=detalhe)
+    _mk_log(db, card_id, db_card.titulo, current_user.nome, f"sugestao_{body.status}", detalhe=detalhe,
+            reversao={"sug_id": sugestao.id, "antes": decisao_antes, "depois": decisao_de(sugestao),
+                      "aplicou": aplicou, "reverteu": reverteu,
+                      "valor_anterior": decisao_antes["valor_anterior"] if reverteu else sugestao.valor_anterior})
     db.commit()
     return {"ok": True}
 
@@ -247,12 +277,8 @@ def delete_suggestion(card_id: str, suggestion_id: str, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Card não encontrado")
     _assert_card_visible(db, current_user, db_card)
 
-    now_iso = datetime.now().isoformat()
-    if sugestao.status == "aceita" and sugestao.campo_alvo and sugestao.valor_anterior is not None:
-        if _revert_suggestion(db, db_card, sugestao.campo_alvo, sugestao.valor_anterior, current_user.nome, sugestao.autor, sugestao.valor_proposto):
-            _bump_card(db, db_card, card_id, current_user, now_iso)
-
-    _mk_log(db, card_id, db_card.titulo, current_user.nome, "sugestao_apagada", detalhe=sugestao.texto[:200])
-    db.delete(sugestao)
+    _, reverteu = apagar_sugestao(db, sugestao, db_card, current_user.nome)
+    if reverteu:
+        _bump_card(db, db_card, card_id, current_user, datetime.now().isoformat())
     db.commit()
     return {"ok": True}

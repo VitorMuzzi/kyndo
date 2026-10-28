@@ -4,8 +4,9 @@ import { API, authFetch } from '../api.js';
 
 const CONFIRMACAO = 'CONFIRMO';
 
-// Ação irreversível: o card de origem é apagado. A palavra digitada é o
-// segundo portão (o primeiro é ser admin) e o servidor revalida os dois.
+// Ação pesada: o card de origem é apagado, e desfazer pela auditoria só
+// funciona enquanto o destino não mudar. A palavra digitada é o segundo
+// portão (o primeiro é ser admin) e o servidor revalida os dois.
 export default function MergeCardDialog({ card, allCards, allColumns, onCancel, onMerged }) {
   const [busca, setBusca] = useState('');
   const [destinoId, setDestinoId] = useState(null);
@@ -116,7 +117,7 @@ export default function MergeCardDialog({ card, allCards, allColumns, onCancel, 
                 <span className="text-emerald-300 font-bold truncate">{destino.titulo}</span>
               </div>
               <ul className="text-[11px] text-slate-400 space-y-1 leading-relaxed">
-                <li>• Etapas, comentários, responsáveis, anexos, sugestões, anotações, mapas mentais e desenhos passam para o destino.</li>
+                <li>• Etapas, comentários, responsáveis, anexos, sugestões, anotações, mapas mentais, desenhos e o tempo registrado passam para o destino.</li>
                 <li>• A descrição da origem é anexada ao fim da descrição do destino.</li>
                 <li>• O destino mantém prazo, prioridade e GitHub próprios; o que ele não tiver, herda da origem.</li>
                 <li>• O histórico de auditoria da origem passa a viver no destino.</li>
@@ -128,7 +129,7 @@ export default function MergeCardDialog({ card, allCards, allColumns, onCancel, 
             <div className="flex items-start gap-2 text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-lg p-2.5">
               <AlertTriangle size={14} className="shrink-0 mt-0.5"/>
               <p className="text-[11px] leading-relaxed">
-                Isso <span className="font-bold">não tem como desfazer</span>. Digite <span className="font-black tracking-wider">{CONFIRMACAO}</span> para liberar o botão.
+                Só dá para desfazer pelo log de auditoria, em até 30 dias e <span className="font-bold">só se o card de destino não for alterado depois</span>. Digite <span className="font-black tracking-wider">{CONFIRMACAO}</span> para liberar o botão.
               </p>
             </div>
             <input

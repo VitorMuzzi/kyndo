@@ -6,13 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from attachment_storage import purgar_anexos_do_card
 from database import get_db
 from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, SuggestionDB, UserDB
 from schemas import CardMergeRequest, CardReorderItem, CardSchema
 from security import get_current_user, require_admin
 from audit import _mk_log, carimbar_autoria_checklist, log_card_created, log_card_deleted, process_card_update
 from card_merge import CONFIRMACAO, confirmacao_valida, fundir_cards
+from lixeira import excluir_card
 from rbac import filter_checklist_for_permission, get_user_permissions, get_visible_column_ids, require_permission
 
 router = APIRouter()
@@ -140,6 +140,14 @@ def _serialize_card(c: CardDB, visto_versao, item_seen_map, sugestoes_pendentes=
     }
 
 
+def recorrencia_de(card):
+    return {
+        "recorrente": bool(card.recorrente), "recorrencia_dias": card.recorrencia_dias,
+        "recorrencia_coluna_reset": card.recorrencia_coluna_reset,
+        "recorrencia_proximo_reset": card.recorrencia_proximo_reset,
+    }
+
+
 def _reset_checklist_progress(checklist):
     reiniciado = []
     for item in checklist or []:
@@ -167,6 +175,7 @@ def _apply_due_recurrences(db):
     if not due:
         return
     for card in due:
+        antes = {"checklist": card.checklist, "status": card.status}
         card.checklist = _reset_checklist_progress(card.checklist)
         dias = max(1, card.recorrencia_dias or 1)  # linha antiga com valor inválido não pode travar o loop abaixo
         if card.recorrencia_coluna_reset and db.query(ColumnDB).filter(ColumnDB.id == card.recorrencia_coluna_reset).first():
@@ -177,7 +186,8 @@ def _apply_due_recurrences(db):
         card.recorrencia_proximo_reset = proximo.isoformat()
         card.alteracoes = (card.alteracoes or 0) + 1
         card.updated_em = now_iso
-        _mk_log(db, card.id, card.titulo, "sistema", "tarefa_recorrente_reiniciada", detalhe=f"checklist reiniciado (recorrência de {dias} dia{'s' if dias != 1 else ''})")
+        _mk_log(db, card.id, card.titulo, "sistema", "tarefa_recorrente_reiniciada", detalhe=f"checklist reiniciado (recorrência de {dias} dia{'s' if dias != 1 else ''})",
+                reversao={"antes": antes, "depois": {"checklist": card.checklist, "status": card.status}})
     db.commit()
 
 
@@ -301,16 +311,21 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
 
         recorrente_novo = bool(card.recorrente and card.recorrencia_dias)
         rearmar = recorrente_novo and (not db_card.recorrente or db_card.recorrencia_dias != card.recorrencia_dias)
+        rec_antes = recorrencia_de(db_card)
         if rearmar:
             db_card.recorrencia_coluna_reset = db_card.status
             db_card.recorrencia_proximo_reset = (datetime.now() + timedelta(days=card.recorrencia_dias)).isoformat()
-            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_configurada", detalhe=f"a cada {card.recorrencia_dias} dia(s), volta para {db_card.status}")
         elif not recorrente_novo and db_card.recorrente:
             db_card.recorrencia_coluna_reset = None
             db_card.recorrencia_proximo_reset = None
-            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_desativada")
         db_card.recorrente = recorrente_novo
         db_card.recorrencia_dias = card.recorrencia_dias if recorrente_novo else None
+        if rearmar:
+            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_configurada", detalhe=f"a cada {card.recorrencia_dias} dia(s), volta para {db_card.status}",
+                    reversao={"antes": rec_antes, "depois": recorrencia_de(db_card)})
+        elif rec_antes["recorrente"] and not recorrente_novo:
+            _mk_log(db, card_id, db_card.titulo, current_user.nome, "recorrencia_desativada",
+                    reversao={"antes": rec_antes, "depois": recorrencia_de(db_card)})
 
         db_card.updated_em = now_iso
         if meaningful:
@@ -346,14 +361,11 @@ def delete_card(card_id: str, db: Session = Depends(get_db), current_user: UserD
         is_author = db_card.autor == current_user.nome
         if "excluir_card" not in perms and not (is_author and db_card.status == "col-1"):
             raise HTTPException(status_code=403, detail="Sem permissão para excluir este card")
-        log_card_deleted(db, db_card, current_user.nome)
-        db.delete(db_card)
-        db.query(CardSeenDB).filter(CardSeenDB.card_id == card_id).delete()
-        db.query(ItemSeenDB).filter(ItemSeenDB.card_id == card_id).delete()
-        # Anexo que sobrevive ao card vira órfão: a linha continua viva
-        # apontando pra um card inexistente, e o download passa a não ter como
-        # checar visibilidade. Some junto com o card, arquivo e tudo.
-        purgar_anexos_do_card(db, card_id)
+        # Vai pra lixeira com tempo, anexos e "lidos" — recuperável por 30 dias
+        # pelo log de auditoria. As linhas de anexo saem junto (sem elas o
+        # download não acha o arquivo), mas o arquivo fica no disco até expirar.
+        lixeira_id = excluir_card(db, db_card, current_user.nome)
+        log_card_deleted(db, db_card, current_user.nome, lixeira_id)
         db.commit()
     return {"msg": "deletado"}
 

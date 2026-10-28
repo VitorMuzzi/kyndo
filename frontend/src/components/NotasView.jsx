@@ -4,6 +4,7 @@ import { API, authFetch } from '../api.js';
 import TextEditor from './TextEditor.jsx';
 import CanvasEditor from './CanvasEditor.jsx';
 import ShareControls from './ShareControls.jsx';
+import LixeiraPessoal from './LixeiraPessoal.jsx';
 
 export default function NotasView({ user, allUsers, cards, openItemId, onOpenItemHandled }) {
   const [notes, setNotes]           = useState([]);
@@ -85,6 +86,15 @@ export default function NotasView({ user, allUsers, cards, openItemId, onOpenIte
     authFetch(`${API}/notes/${noteId}`, { method: 'DELETE' });
   };
 
+  // Nota recuperada da lixeira: recarrega a lista e já abre ela.
+  const aoRecuperar = (noteId) => {
+    authFetch(`${API}/notes`).then(r => r.ok ? r.json() : null).then(data => {
+      if (!data) return;
+      setNotes(data);
+      if (data.some(n => n.id === noteId)) setActiveId(noteId);
+    });
+  };
+
   const filtered = notes.filter(n =>
     n.titulo?.toLowerCase().includes(search.toLowerCase()) ||
     n.conteudo?.toLowerCase().includes(search.toLowerCase())
@@ -119,9 +129,12 @@ export default function NotasView({ user, allUsers, cards, openItemId, onOpenIte
             </div>
           ))}
         </div>
-        <div className="p-3 border-t border-white/10 shrink-0 flex gap-2">
-          <button onClick={() => createNote('texto')}  className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors">+ Texto</button>
-          <button onClick={() => createNote('canvas')} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors">+ Mapa</button>
+        <div className="p-3 border-t border-white/10 shrink-0 space-y-2">
+          <div className="flex gap-2">
+            <button onClick={() => createNote('texto')}  className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors">+ Texto</button>
+            <button onClick={() => createNote('canvas')} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors">+ Mapa</button>
+          </div>
+          <LixeiraPessoal tipo="nota" onRecuperado={aoRecuperar}/>
         </div>
       </aside>
 

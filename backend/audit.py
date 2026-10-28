@@ -20,7 +20,10 @@ SIMPLE_CARD_FIELDS = [
 SIMPLE_CARD_FIELDS_MAP = dict(SIMPLE_CARD_FIELDS)
 
 
-def _mk_log(db, card_id, card_titulo, usuario, acao, valor_antigo=None, valor_novo=None, detalhe=None):
+def _mk_log(db, card_id, card_titulo, usuario, acao, valor_antigo=None, valor_novo=None, detalhe=None,
+            reversao=None, alvo_tipo=None, alvo_id=None, lixeira_id=None):
+    """`reversao` guarda o necessário pra desfazer (ver reversao.py); para
+    alvos fora de card, card_titulo carrega o nome do alvo (nota, usuário...)."""
     db.add(AuditLogDB(
         id=f"log-{uuid.uuid4().hex[:10]}",
         card_id=card_id,
@@ -31,7 +34,38 @@ def _mk_log(db, card_id, card_titulo, usuario, acao, valor_antigo=None, valor_no
         valor_novo=valor_novo,
         detalhe=detalhe,
         data=datetime.now().isoformat(),
+        alvo_tipo=alvo_tipo,
+        alvo_id=alvo_id,
+        reversao=reversao,
+        lixeira_id=lixeira_id,
     ))
+
+
+def posicao_em(lista, item_id):
+    """(índice, id do anterior) de um item numa lista de dicts com id — é o
+    que reversao.py usa pra devolver um item excluído ao mesmo lugar."""
+    for i, x in enumerate(lista or []):
+        if isinstance(x, dict) and x.get("id") == item_id:
+            anterior = lista[i - 1].get("id") if i > 0 and isinstance(lista[i - 1], dict) else None
+            return i, anterior
+    return None, None
+
+
+def _estado_conclusao(no):
+    return {"concluido": bool(no.get("concluido")), "concluidoPor": no.get("concluidoPor")}
+
+
+def _filhas(checklist, pai_id):
+    for item in checklist or []:
+        if isinstance(item, dict) and item.get("id") == pai_id:
+            return item.get("subetapas") or []
+    return []
+
+
+def _lista_do_pai(checklist, pai_id):
+    if pai_id is None:
+        return checklist or []
+    return _filhas(checklist, pai_id)
 
 
 def _sanitize_subetapas(raw_subetapas):
@@ -142,21 +176,23 @@ def _diff_estrutura(db, card_id, titulo, old_flat, new_flat, old_checklist, new_
             continue
         antigo_nivel, antigo_item, antigo_pai = antigo
         texto = novo_item.get("texto") or antigo_item.get("texto") or ""
+        indice_antigo, _ = posicao_em(_lista_do_pai(old_checklist, antigo_pai), iid)
+        mov = {"item_id": iid, "antes": {"pai_id": antigo_pai, "indice": indice_antigo}, "depois": {"pai_id": novo_pai}}
         if antigo_nivel != novo_nivel:
             movidos.add(iid)
             if novo_nivel == 1:
                 pai = (new_flat.get(novo_pai, (None, {}, None))[1] or {}).get("texto") or ""
                 _mk_log(db, card_id, titulo, usuario, "etapa_indentada",
-                        detalhe=f"{texto} virou sub-etapa de {pai}")
+                        detalhe=f"{texto} virou sub-etapa de {pai}", reversao=mov)
             else:
                 _mk_log(db, card_id, titulo, usuario, "etapa_desindentada",
-                        detalhe=f"{texto} deixou de ser sub-etapa e virou etapa")
+                        detalhe=f"{texto} deixou de ser sub-etapa e virou etapa", reversao=mov)
         elif novo_nivel == 1 and antigo_pai != novo_pai:
             movidos.add(iid)
             pai_antigo = (old_flat.get(antigo_pai, (None, {}, None))[1] or {}).get("texto") or ""
             pai_novo = (new_flat.get(novo_pai, (None, {}, None))[1] or {}).get("texto") or ""
             _mk_log(db, card_id, titulo, usuario, "subetapa_movida",
-                    detalhe=f"{texto}: de {pai_antigo} para {pai_novo}")
+                    detalhe=f"{texto}: de {pai_antigo} para {pai_novo}", reversao=mov)
 
     # Reordenação pura só é registrada quando nada mudou de nível nem de pai —
     # se mudou, os logs acima já explicam o rearranjo.
@@ -164,11 +200,12 @@ def _diff_estrutura(db, card_id, titulo, old_flat, new_flat, old_checklist, new_
         old_seq, new_seq = _sequencia_ids(old_checklist), _sequencia_ids(new_checklist)
         if set(old_seq) == set(new_seq) and old_seq != new_seq:
             _mk_log(db, card_id, titulo, usuario, "etapas_reordenadas",
-                    detalhe=f"{len(new_seq)} item(ns) reorganizado(s)")
+                    detalhe=f"{len(new_seq)} item(ns) reorganizado(s)",
+                    reversao={"antes": old_seq, "depois": new_seq})
     return movidos
 
 
-def _diff_subetapas(db, card_id, titulo, item_texto, old_subs, new_subs, usuario, movidos=frozenset()):
+def _diff_subetapas(db, card_id, titulo, item_texto, old_subs, new_subs, usuario, movidos=frozenset(), pai_id=None):
     old_by_id = {s["id"]: s for s in (old_subs or []) if isinstance(s, dict) and "id" in s}
     new_by_id = {s["id"]: s for s in (new_subs or []) if isinstance(s, dict) and "id" in s}
     meaningful = False
@@ -177,22 +214,27 @@ def _diff_subetapas(db, card_id, titulo, item_texto, old_subs, new_subs, usuario
         if old is None:
             if sid in movidos:
                 continue  # não é nova: veio de outro nível/pai, já logado em _diff_estrutura
-            _mk_log(db, card_id, titulo, usuario, "subetapa_criada", detalhe=f"{item_texto} > {s.get('texto')}")
+            _mk_log(db, card_id, titulo, usuario, "subetapa_criada", detalhe=f"{item_texto} > {s.get('texto')}",
+                    reversao={"pai_id": pai_id, "item": s})
             meaningful = True
             continue
         if (old.get("texto") or "") != (s.get("texto") or ""):
-            _mk_log(db, card_id, titulo, usuario, "subetapa_editada", detalhe=item_texto, valor_antigo=old.get("texto"), valor_novo=s.get("texto"))
+            _mk_log(db, card_id, titulo, usuario, "subetapa_editada", detalhe=item_texto, valor_antigo=old.get("texto"), valor_novo=s.get("texto"),
+                    reversao={"item_id": sid, "antes": old.get("texto"), "depois": s.get("texto")})
             meaningful = True
         if bool(old.get("concluido")) != bool(s.get("concluido")):
             acao = "subetapa_concluida" if s.get("concluido") else "subetapa_reaberta"
-            _mk_log(db, card_id, titulo, usuario, acao, detalhe=f"{item_texto} > {s.get('texto')}")
+            _mk_log(db, card_id, titulo, usuario, acao, detalhe=f"{item_texto} > {s.get('texto')}",
+                    reversao={"item_id": sid, "antes": _estado_conclusao(old), "depois": _estado_conclusao(s)})
             meaningful = True
     for sid, old in old_by_id.items():
         if sid not in new_by_id:
             if sid in movidos:
                 continue  # não foi excluída: mudou de nível/pai, já logado em _diff_estrutura
             # Deleting a sub-step doesn't count toward the home-screen badge — logged only.
-            _mk_log(db, card_id, titulo, usuario, "subetapa_excluida", detalhe=f"{item_texto} > {old.get('texto')}")
+            indice, anterior = posicao_em(old_subs, sid)
+            _mk_log(db, card_id, titulo, usuario, "subetapa_excluida", detalhe=f"{item_texto} > {old.get('texto')}",
+                    reversao={"pai_id": pai_id, "item": old, "indice": indice, "anterior_id": anterior})
     return meaningful
 
 
@@ -209,23 +251,26 @@ def diff_checklist(db, card_id, titulo, old_checklist, new_checklist, usuario):
         old = old_by_id.get(item["id"])
         if old is None:
             if item["id"] not in movidos:
-                _mk_log(db, card_id, titulo, usuario, "etapa_criada", detalhe=item.get("texto"))
+                _mk_log(db, card_id, titulo, usuario, "etapa_criada", detalhe=item.get("texto"), reversao={"item": item})
                 meaningful = True
                 continue
             # Desindentada: já veio de uma sub-etapa. Segue pro diff de campos
             # abaixo comparando com o registro antigo dela no outro nível.
             old = old_flat[item["id"]][1]
         if (old.get("texto") or "") != (item.get("texto") or ""):
-            _mk_log(db, card_id, titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=old.get("texto"), valor_novo=item.get("texto"))
+            _mk_log(db, card_id, titulo, usuario, "etapa_editada", detalhe=item.get("texto"), valor_antigo=old.get("texto"), valor_novo=item.get("texto"),
+                    reversao={"item_id": item["id"], "antes": old.get("texto"), "depois": item.get("texto")})
             meaningful = True
         if bool(old.get("concluido")) != bool(item.get("concluido")):
             acao = "etapa_concluida" if item.get("concluido") else "etapa_reaberta"
-            _mk_log(db, card_id, titulo, usuario, acao, detalhe=item.get("texto"))
+            _mk_log(db, card_id, titulo, usuario, acao, detalhe=item.get("texto"),
+                    reversao={"item_id": item["id"], "antes": _estado_conclusao(old), "depois": _estado_conclusao(item)})
             meaningful = True
         if (old.get("notas") or "") != (item.get("notas") or ""):
-            _mk_log(db, card_id, titulo, usuario, "etapa_observacao_editada", detalhe=item.get("texto"), valor_antigo=old.get("notas"), valor_novo=item.get("notas"))
+            _mk_log(db, card_id, titulo, usuario, "etapa_observacao_editada", detalhe=item.get("texto"), valor_antigo=old.get("notas"), valor_novo=item.get("notas"),
+                    reversao={"item_id": item["id"], "antes": old.get("notas"), "depois": item.get("notas")})
             meaningful = True
-        if _diff_subetapas(db, card_id, titulo, item.get("texto"), old.get("subetapas"), item.get("subetapas"), usuario, movidos):
+        if _diff_subetapas(db, card_id, titulo, item.get("texto"), old.get("subetapas"), item.get("subetapas"), usuario, movidos, pai_id=item["id"]):
             meaningful = True
     for iid, old in old_by_id.items():
         if iid not in new_ids:
@@ -236,7 +281,9 @@ def diff_checklist(db, card_id, titulo, old_checklist, new_checklist, usuario):
             detalhe = old.get("texto") or ""
             if n_subs:
                 detalhe += f" (incluía {n_subs} sub-etapa{'s' if n_subs != 1 else ''})"
-            _mk_log(db, card_id, titulo, usuario, "etapa_excluida", detalhe=detalhe)
+            indice, anterior = posicao_em(old_checklist, iid)
+            _mk_log(db, card_id, titulo, usuario, "etapa_excluida", detalhe=detalhe,
+                    reversao={"item": old, "indice": indice, "anterior_id": anterior})
     return meaningful
 
 
@@ -246,7 +293,7 @@ def diff_comentarios(db, card_id, titulo, old_comentarios, new_comentarios, usua
     meaningful = False
     for c in new_comentarios or []:
         if isinstance(c, dict) and c.get("id") not in old_by_id:
-            _mk_log(db, card_id, titulo, usuario, "comentario_adicionado", detalhe=c.get("texto"))
+            _mk_log(db, card_id, titulo, usuario, "comentario_adicionado", detalhe=c.get("texto"), reversao={"comentario": c})
             meaningful = True
     # Só quem tem editar_card chega aqui com comentário faltando (o router
     # reverte os demais), mas mesmo essa pessoa não pode apagar conversa sem
@@ -254,8 +301,10 @@ def diff_comentarios(db, card_id, titulo, old_comentarios, new_comentarios, usua
     for cid, old in old_by_id.items():
         if cid not in new_ids:
             autor = old.get("autor") or "?"
+            indice, anterior = posicao_em(old_comentarios, cid)
             _mk_log(db, card_id, titulo, usuario, "comentario_removido",
-                    detalhe=f"de {autor}: {old.get('texto')}")
+                    detalhe=f"de {autor}: {old.get('texto')}",
+                    reversao={"comentario": old, "indice": indice, "anterior_id": anterior})
     return meaningful
 
 
@@ -265,12 +314,14 @@ def diff_card_fields(db, db_card, new, usuario, titulo_ref):
         old_v = getattr(db_card, field) or ""
         new_v = getattr(new, field) or ""
         if old_v != new_v:
-            _mk_log(db, db_card.id, titulo_ref, usuario, acao, valor_antigo=old_v or None, valor_novo=new_v or None)
+            _mk_log(db, db_card.id, titulo_ref, usuario, acao, valor_antigo=old_v or None, valor_novo=new_v or None,
+                    reversao={"campo": field, "antes": getattr(db_card, field), "depois": getattr(new, field)})
             meaningful = True
     old_resp = sorted(db_card.responsaveis or [])
     new_resp = sorted(new.responsaveis or []) if new.responsaveis else old_resp
     if old_resp != new_resp:
-        _mk_log(db, db_card.id, titulo_ref, usuario, "responsaveis_alterados", valor_antigo=", ".join(old_resp) or None, valor_novo=", ".join(new_resp) or None)
+        _mk_log(db, db_card.id, titulo_ref, usuario, "responsaveis_alterados", valor_antigo=", ".join(old_resp) or None, valor_novo=", ".join(new_resp) or None,
+                reversao={"antes": list(db_card.responsaveis or []), "depois": list(new.responsaveis or [])})
         meaningful = True
     return meaningful
 
@@ -296,5 +347,6 @@ def log_card_created(db, card, usuario):
     _mk_log(db, card.id, card.titulo, usuario, "card_criado")
 
 
-def log_card_deleted(db, card, usuario):
-    _mk_log(db, card.id, card.titulo, usuario, "card_excluido")
+def log_card_deleted(db, card, usuario, lixeira_id=None):
+    _mk_log(db, card.id, card.titulo, usuario, "card_excluido", lixeira_id=lixeira_id,
+            reversao={"lixeira_id": lixeira_id} if lixeira_id else None)

@@ -23,6 +23,9 @@ PERMISSIONS = {
     "ver_etapas": "Ver a aba de Etapas dentro do card",
     "gerenciar_responsaveis": "Gerenciar responsáveis de um card",
     "decidir_sugestoes": "Aceitar/rejeitar sugestões",
+    "ver_tempo_equipe": "Ver os registros de tempo (horários) de cada pessoa nos cards",
+    "acessar_gestao": "Acessar a tela de Gestão (horas e andamento da equipe)",
+    "restaurar_alteracoes": "Recuperar itens excluídos e desfazer alterações (pelo log de auditoria)",
 }
 
 

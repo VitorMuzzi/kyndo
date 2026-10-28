@@ -15,11 +15,24 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from init_data import init_db
 from migrations import assign_default_user_roles, run_migrations
-from routers import attachments, audit, auth, cards, columns, drawings, github, metrics, notes, roles, suggestions, users
+from routers import attachments, audit, auth, cards, columns, drawings, gestao, github, metrics, notes, roles, suggestions, tempo, users
 
 run_migrations()
 init_db()
 assign_default_user_roles()
+
+
+def _purgar_lixeira_na_subida():
+    from database import SessionLocal
+    from lixeira import purgar_lixeira
+    db = SessionLocal()
+    try:
+        purgar_lixeira(db)
+    finally:
+        db.close()
+
+
+_purgar_lixeira_na_subida()
 
 app = FastAPI(title="Kyndo API")
 
@@ -43,3 +56,5 @@ app.include_router(roles.router)
 app.include_router(attachments.router)
 app.include_router(metrics.router)
 app.include_router(github.router)
+app.include_router(tempo.router)
+app.include_router(gestao.router)

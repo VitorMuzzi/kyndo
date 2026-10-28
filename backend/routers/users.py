@@ -3,7 +3,9 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from audit import _mk_log
 from database import get_db
+from lixeira import excluir_usuario
 from models import RoleDB, UserDB, UserRoleDB
 from rbac import get_user_permissions, is_superadmin, require_permission
 from schemas import PasswordUpdate, UserCreate
@@ -44,6 +46,8 @@ def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: Us
     usuario_role = db.query(RoleDB).filter(RoleDB.nome == "Usuário").first()
     if usuario_role:
         db.add(UserRoleDB(user_id=novo.id, role_id=usuario_role.id))
+    _mk_log(db, None, novo.nome, current_user.nome, "usuario_criado", alvo_tipo="usuario", alvo_id=novo.id,
+            reversao={"user_id": novo.id, "senha_versao": 0})
     db.commit()
     return {"msg": "criado"}
 
@@ -59,8 +63,9 @@ def delete_user(user_id: str, db: Session = Depends(get_db), current_user: UserD
                 raise HTTPException(status_code=403, detail="Só um Superadmin pode excluir outro Superadmin")
             if sum(1 for u in db.query(UserDB).all() if is_superadmin(db, u)) <= 1:
                 raise HTTPException(status_code=400, detail="Não é possível excluir o único Superadmin do sistema")
-        db.delete(user)
-        db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).delete()
+        lixeira_id = excluir_usuario(db, user, current_user.nome)
+        _mk_log(db, None, user.nome, current_user.nome, "usuario_excluido", alvo_tipo="usuario", alvo_id=user.id,
+                lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id})
         db.commit()
     return {"msg": "deletado"}
 

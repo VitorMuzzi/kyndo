@@ -262,6 +262,7 @@ def test_merge_response_reports_what_moved(client, admin_token):
     assert body["resumo"]["etapas"] == 1
     assert set(body["resumo"]) == {
         "etapas", "comentarios", "anexos", "sugestoes", "notas", "desenhos", "eventos_log",
+        "registros_tempo",
     }
 
 
