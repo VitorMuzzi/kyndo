@@ -651,25 +651,26 @@ export default function App() {
         style={{ paddingTop: headerPinned ? headerHeight + 12 : undefined }}
       >
         <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
-          <div className="relative min-h-full w-full">
+          <div className="relative min-h-full md:h-full w-full">
             <Droppable droppableId="board" direction="horizontal" type="column">
               {(provided) => (
-                <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 items-start w-full">
+                <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 items-start w-full md:h-full">
                   {cols.map((col, index) => (
                     <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={!canManageColumns}>
                       {(p, snapshot) => (
                         <div ref={p.innerRef} {...p.draggableProps}
-                          className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl border border-t-[6px] border-slate-800 min-h-[120px] max-h-[calc(100dvh-4rem)] transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
+                          className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl border border-t-[6px] border-slate-800 min-h-[120px] max-h-[calc(100dvh-4rem)] md:max-h-full transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
                           style={{ ...p.draggableProps.style, borderTopColor: col.cor, background: `linear-gradient(180deg, ${col.cor}2e 0%, #0f172a 60%)` }}>
 
                           <div {...p.dragHandleProps} className="p-3 pl-4 flex items-center justify-between gap-2 relative shrink-0">
-                            <div className="flex items-center gap-2">
-                              {col.publica ? <Unlock size={12} className="text-emerald-500" /> : <Lock size={12} className="text-slate-500" />}
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              {col.publica ? <Unlock size={12} className="text-emerald-500 shrink-0" /> : <Lock size={12} className="text-slate-500 shrink-0" />}
                               <input
                                 disabled={!canManageColumns}
                                 value={col.titulo}
+                                title={col.titulo}
                                 onChange={e => handleColTitleChange(col, e.target.value)}
-                                className="bg-transparent font-bold text-slate-100 text-sm w-full outline-none uppercase tracking-widest disabled:opacity-100"
+                                className="bg-transparent font-bold text-slate-100 text-sm w-full min-w-0 outline-none uppercase tracking-widest text-ellipsis disabled:opacity-100"
                               />
                             </div>
                             {canManageColumns && (
@@ -740,16 +741,21 @@ export default function App() {
                                             className={`relative p-4 rounded-xl bg-slate-800 border border-slate-700/80 cursor-pointer hover:bg-slate-700/70 transition-all flex flex-col gap-2 ${stylePrioridade}`}
                                             style={{ ...kp.draggableProps.style, ...(kSnap.isDropAnimating && { transitionDuration: '0.001s' }) }}>
 
+                                            {/* Prioridade e prazo quebram linha quando o card é estreito,
+                                                pra que os balões de aviso nunca sejam empurrados pra fora. */}
                                             <div className="flex justify-between items-start gap-1.5">
-                                              <span className={`text-xs uppercase px-2 py-0.5 rounded shrink-0 ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
-                                                {card.prioridade || 'Normal'}
-                                              </span>
-                                              <div className="flex items-center gap-1.5 shrink-0">
+                                              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                                                <span className={`text-xs uppercase px-2 py-0.5 rounded shrink-0 ${PRIORIDADES_BADGE[card.prioridade || 'Normal']}`}>
+                                                  {card.prioridade || 'Normal'}
+                                                </span>
                                                 {card.prazo && (
-                                                  <span className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/15 font-bold px-1.5 py-0.5 rounded">
+                                                  <span className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/15 font-bold px-1.5 py-0.5 rounded whitespace-nowrap">
                                                     <Calendar size={12} /> {formatarData(card.prazo)}
                                                   </span>
                                                 )}
+                                              </div>
+                                              <div className="flex items-center gap-1 shrink-0 pt-px">
+
                                                 {/* Âmbar com balão = sugestão esperando decisão. Fica aceso
                                                     pra todos os decisores até alguém aceitar ou recusar —
                                                     diferente do vermelho, que é "você não viu" e some sozinho. */}
@@ -769,7 +775,7 @@ export default function App() {
                                               </div>
                                             </div>
 
-                                            <p className="text-base font-bold text-slate-100 leading-tight">{card.titulo}</p>
+                                            <p className="text-base font-bold text-slate-100 leading-tight break-words">{card.titulo}</p>
 
                                             {totalEtapas > 0 && progresso > 0 && (
                                               <div>
@@ -784,7 +790,7 @@ export default function App() {
                                             )}
 
                                             <div className="flex justify-between items-center mt-1 border-t pt-2 border-slate-700">
-                                              <div className="flex flex-wrap items-center gap-1">
+                                              <div className="flex flex-wrap items-center gap-1 min-w-0">
                                                 <span className="text-xs text-slate-400 uppercase font-bold">Resp.:</span>
                                                 {(card.responsaveis?.length > 0 ? card.responsaveis : [card.autor]).filter(Boolean).map(nome => (
                                                   <span key={nome} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${userColor(nome)}`}>{nome}</span>
