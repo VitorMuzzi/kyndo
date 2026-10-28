@@ -149,6 +149,18 @@ export default function App() {
       // O cronômetro pode ter sido ligado/desligado em outra aba ou máquina.
       const atual = await buscarCronometroAtual();
       if (atual !== undefined) setCronometro(atual);
+      // Cargo dado ou tirado vale sem sair e entrar: as permissões do login
+      // ficariam congeladas na sessão até o próximo login.
+      const pRes = await authFetch(`${API}/me/permissions`);
+      if (pRes.ok) {
+        const { permissions } = await pRes.json();
+        setUser(u => {
+          if (!u || JSON.stringify(u.permissions || []) === JSON.stringify(permissions)) return u;
+          const atualizado = { ...u, permissions };
+          sessionStorage.setItem('demandaflow_user', JSON.stringify(atualizado));
+          return atualizado;
+        });
+      }
     } catch (e) { console.error('sync error', e); }
     finally { setTimeout(() => setIsSyncing(false), 500); }
   };
@@ -420,7 +432,7 @@ export default function App() {
     <div className="relative h-[100dvh] font-sans overflow-hidden"
       onMouseMove={e => { setShowLeftArrow(e.clientX < 80); setShowRightArrow(e.clientX > window.innerWidth - 80); }}>
       <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 -z-10" />
-      <span className="fixed bottom-1.5 right-2 z-[5] text-[9px] text-white/20 font-mono pointer-events-none select-none">{APP_VERSION}</span>
+      <span className="fixed bottom-1.5 right-2 z-[5] text-[11px] text-white/40 font-mono pointer-events-none select-none">{APP_VERSION}</span>
 
       {showSearch && (
         <SearchModal

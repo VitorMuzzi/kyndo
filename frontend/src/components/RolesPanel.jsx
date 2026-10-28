@@ -3,11 +3,13 @@ import { Shield, Plus, Trash2, Lock } from 'lucide-react';
 import { API, authFetch } from '../api.js';
 
 const GRUPOS = [
-  { titulo: 'Usuários', chaves: ['gerenciar_usuarios', 'excluir_usuarios', 'trocar_senha_outros', 'gerenciar_cargos', 'ver_log_auditoria'] },
+  { titulo: 'Usuários', chaves: ['gerenciar_usuarios', 'excluir_usuarios', 'trocar_senha_outros', 'gerenciar_cargos', 'ver_log_auditoria', 'restaurar_alteracoes'] },
   { titulo: 'Quadro', chaves: ['gerenciar_colunas', 'reordenar_cards', 'criar_card_coluna_privada'] },
   { titulo: 'Cards', chaves: ['editar_card', 'excluir_card', 'editar_prioridade', 'editar_prazo', 'ver_etapas', 'gerenciar_etapas', 'concluir_etapas', 'gerenciar_responsaveis'] },
   { titulo: 'Sugestões', chaves: ['decidir_sugestoes'] },
+  { titulo: 'Tempo e gestão', chaves: ['ver_tempo_equipe', 'acessar_gestao'] },
 ];
+const AGRUPADAS = new Set(GRUPOS.flatMap(g => g.chaves));
 
 export default function RolesPanel() {
   const [roles, setRoles] = useState([]);
@@ -31,6 +33,10 @@ export default function RolesPanel() {
   }, []);
 
   const labelDe = (chave) => permissoesCatalogo.find(p => p.key === chave)?.label || chave;
+  // Permissão nova no backend que ainda não ganhou grupo aqui aparece em
+  // "Outras" — sem isso ela existe mas não tem como ser marcada em cargo nenhum.
+  const outras = permissoesCatalogo.map(p => p.key).filter(k => !AGRUPADAS.has(k));
+  const grupos = outras.length ? [...GRUPOS, { titulo: 'Outras', chaves: outras }] : GRUPOS;
 
   const iniciarNovo = () => {
     setEditando({}); setNome(''); setCor('#94a3b8'); setPermissoes({});
@@ -87,7 +93,7 @@ export default function RolesPanel() {
           ) : (
             <>
               <div className="space-y-3">
-                {GRUPOS.map(g => (
+                {grupos.map(g => (
                   <div key={g.titulo}>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{g.titulo}</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">

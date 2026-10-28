@@ -5,7 +5,7 @@ from database import get_db
 from models import UserDB
 from rbac import get_user_permissions
 from schemas import LoginRequest
-from security import check_rate_limit, create_access_token, verify_password
+from security import check_rate_limit, create_access_token, get_current_user, verify_password
 
 router = APIRouter()
 
@@ -27,3 +27,10 @@ def login(req: LoginRequest, request: Request, db: Session = Depends(get_db)):
         "senha_temporaria": user.senha_temporaria,
         "token": create_access_token(user),
     }
+
+
+@router.get("/me/permissions")
+def minhas_permissoes(db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    """O login entrega as permissões uma vez; a tela consulta isto na
+    sincronização pra que um cargo dado ou tirado valha sem sair e entrar."""
+    return {"permissions": sorted(get_user_permissions(db, current_user.id))}

@@ -126,3 +126,21 @@ def test_invalid_period_is_rejected(client, admin_token):
     assert client.get("/gestao/visao-geral?inicio=ontem", headers=h).status_code == 400
     assert client.get("/gestao/visao-geral?inicio=2026-02-10&fim=2026-02-01", headers=h).status_code == 400
     assert client.get("/gestao/visao-geral?inicio=2020-01-01&fim=2026-01-01", headers=h).status_code == 400
+
+
+def test_permissions_refresh_without_new_login(client, admin_token):
+    """Cargo dado depois do login vale na hora: a tela consulta /me/permissions."""
+    pessoa = create_user(client, admin_token, "gestao_sem_relogin")
+    antes = client.get("/me/permissions", headers=auth(pessoa["token"])).json()["permissions"]
+    assert "acessar_gestao" not in antes
+
+    cargo = client.post("/roles", json={"nome": "Gestor relogin", "permissoes": {"acessar_gestao": True}},
+                        headers=auth(admin_token)).json()
+    client.put(f"/users/{pessoa['id']}/roles", json={"role_ids": [cargo["id"]]}, headers=auth(admin_token))
+    depois = client.get("/me/permissions", headers=auth(pessoa["token"])).json()["permissions"]
+    assert "acessar_gestao" in depois
+
+
+def test_new_permissions_are_in_the_catalog(client, admin_token):
+    chaves = {p["key"] for p in client.get("/permissions", headers=auth(admin_token)).json()}
+    assert {"ver_tempo_equipe", "acessar_gestao", "restaurar_alteracoes"} <= chaves
