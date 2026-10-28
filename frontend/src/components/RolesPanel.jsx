@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Shield, Plus, Trash2, Lock } from 'lucide-react';
 import { API, authFetch } from '../api.js';
+import { hasPermission } from '../constants.jsx';
 
 const GRUPOS = [
   { titulo: 'Usuários', chaves: ['gerenciar_usuarios', 'excluir_usuarios', 'trocar_senha_outros', 'gerenciar_cargos', 'ver_log_auditoria', 'restaurar_alteracoes'] },
@@ -11,7 +12,7 @@ const GRUPOS = [
 ];
 const AGRUPADAS = new Set(GRUPOS.flatMap(g => g.chaves));
 
-export default function RolesPanel() {
+export default function RolesPanel({ user, meusCargos = [], souSuperadmin = false }) {
   const [roles, setRoles] = useState([]);
   const [permissoesCatalogo, setPermissoesCatalogo] = useState([]);
   const [colunasDisponiveis, setColunasDisponiveis] = useState([]);
@@ -21,6 +22,12 @@ export default function RolesPanel() {
   const [permissoes, setPermissoes] = useState({});
   const [colunasRestritas, setColunasRestritas] = useState(false);
   const [colunasVisiveis, setColunasVisiveis] = useState([]);
+  const [erro, setErro] = useState('');
+
+  // O próprio cargo é só leitura (pra quem não é Superadmin), e permissão
+  // que a pessoa não tem não pode ser ligada nem desligada por ela.
+  const ehMeu = (role) => !souSuperadmin && meusCargos.includes(role?.id);
+  const possoMexer = (chave) => souSuperadmin || hasPermission(user, chave);
 
   const carregarRoles = () => {
     authFetch(`${API}/roles`).then(r => (r.ok ? r.json() : [])).then(setRoles);
@@ -39,20 +46,25 @@ export default function RolesPanel() {
   const grupos = outras.length ? [...GRUPOS, { titulo: 'Outras', chaves: outras }] : GRUPOS;
 
   const iniciarNovo = () => {
+    setErro('');
     setEditando({}); setNome(''); setCor('#94a3b8'); setPermissoes({});
     setColunasRestritas(false); setColunasVisiveis([]);
   };
   const iniciarEdicao = (role) => {
+    setErro('');
     setEditando(role); setNome(role.nome); setCor(role.cor); setPermissoes(role.permissoes || {});
     setColunasRestritas(role.colunas_visiveis != null); setColunasVisiveis(role.colunas_visiveis || []);
   };
 
   const salvar = async () => {
     const body = { nome, cor, permissoes, colunas_restritas: colunasRestritas, colunas_visiveis: colunasVisiveis };
-    if (editando?.id) {
-      await authFetch(`${API}/roles/${editando.id}`, { method: 'PUT', body: JSON.stringify(body) });
-    } else {
-      await authFetch(`${API}/roles`, { method: 'POST', body: JSON.stringify(body) });
+    const res = editando?.id
+      ? await authFetch(`${API}/roles/${editando.id}`, { method: 'PUT', body: JSON.stringify(body) })
+      : await authFetch(`${API}/roles`, { method: 'POST', body: JSON.stringify(body) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setErro(data.detail || 'Não foi possível salvar o cargo.');
+      return;
     }
     setEditando(null);
     carregarRoles();
@@ -60,7 +72,11 @@ export default function RolesPanel() {
 
   const excluir = async (role) => {
     if (!window.confirm(`Excluir o cargo "${role.nome}"?`)) return;
-    await authFetch(`${API}/roles/${role.id}`, { method: 'DELETE' });
+    const res = await authFetch(`${API}/roles/${role.id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.detail || 'Não foi possível excluir o cargo.');
+    }
     carregarRoles();
   };
 
@@ -80,11 +96,11 @@ export default function RolesPanel() {
           <div className="flex gap-3 items-end">
             <div className="flex-1">
               <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Nome</label>
-              <input value={nome} onChange={e => setNome(e.target.value)} disabled={editando.protegido} className="w-full p-2 bg-slate-900 text-slate-100 border border-slate-700 rounded-lg outline-none focus:border-emerald-500 disabled:bg-slate-800 disabled:text-slate-500" />
+              <input value={nome} onChange={e => setNome(e.target.value)} disabled={editando.protegido || ehMeu(editando)} className="w-full p-2 bg-slate-900 text-slate-100 border border-slate-700 rounded-lg outline-none focus:border-emerald-500 disabled:bg-slate-800 disabled:text-slate-500" />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Cor</label>
-              <input type="color" value={cor} onChange={e => setCor(e.target.value)} disabled={editando.protegido} className="w-12 h-9 rounded border border-slate-700 bg-slate-900" />
+              <input type="color" value={cor} onChange={e => setCor(e.target.value)} disabled={editando.protegido || ehMeu(editando)} className="w-12 h-9 rounded border border-slate-700 bg-slate-900" />
             </div>
           </div>
 
@@ -92,17 +108,26 @@ export default function RolesPanel() {
             <p className="text-xs text-slate-400 italic">Este cargo é protegido — sempre tem todas as permissões e não pode ser alterado ou excluído.</p>
           ) : (
             <>
+              {ehMeu(editando) ? (
+                <p className="text-xs text-amber-300/80">Você tem este cargo, então não pode alterá-lo — peça a outra pessoa.</p>
+              ) : !souSuperadmin && (
+                <p className="text-xs text-slate-500">Permissões que você não tem aparecem bloqueadas: você só repassa o que já tem.</p>
+              )}
               <div className="space-y-3">
                 {grupos.map(g => (
                   <div key={g.titulo}>
                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{g.titulo}</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                      {g.chaves.map(chave => (
-                        <label key={chave} className="flex items-center gap-2 text-sm text-slate-300 p-1">
-                          <input type="checkbox" checked={!!permissoes[chave]} onChange={e => setPermissoes({ ...permissoes, [chave]: e.target.checked })} />
-                          {labelDe(chave)}
-                        </label>
-                      ))}
+                      {g.chaves.map(chave => {
+                        const bloqueada = ehMeu(editando) || !possoMexer(chave);
+                        return (
+                          <label key={chave} className={`flex items-center gap-2 text-sm p-1 ${bloqueada ? 'text-slate-500' : 'text-slate-300'}`}>
+                            <input type="checkbox" disabled={bloqueada} checked={!!permissoes[chave]} onChange={e => setPermissoes({ ...permissoes, [chave]: e.target.checked })} />
+                            {labelDe(chave)}
+                            {!possoMexer(chave) && <Lock size={11} className="text-slate-600 shrink-0"/>}
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -142,8 +167,9 @@ export default function RolesPanel() {
             </>
           )}
 
+          {erro && <p className="text-xs font-bold text-red-400">{erro}</p>}
           <div className="flex gap-2">
-            {!editando.protegido && <button onClick={salvar} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold transition-colors">Salvar</button>}
+            {!editando.protegido && !ehMeu(editando) && <button onClick={salvar} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold transition-colors">Salvar</button>}
             <button onClick={() => setEditando(null)} className="px-4 py-2 bg-slate-900 border border-slate-700 hover:bg-slate-700 rounded-lg text-sm font-bold text-slate-300 transition-colors">Fechar</button>
           </div>
         </div>
@@ -158,8 +184,9 @@ export default function RolesPanel() {
               {r.protegido && <Lock size={12} className="text-slate-500"/>}
             </div>
             <div className="flex items-center gap-2">
-              <button onClick={() => iniciarEdicao(r)} className="text-xs font-bold text-emerald-400 hover:underline">{r.protegido ? 'Ver' : 'Editar'}</button>
-              {!r.protegido && (
+              {ehMeu(r) && <span className="text-[10px] text-slate-500">seu cargo</span>}
+              <button onClick={() => iniciarEdicao(r)} className="text-xs font-bold text-emerald-400 hover:underline">{r.protegido || ehMeu(r) ? 'Ver' : 'Editar'}</button>
+              {!r.protegido && !ehMeu(r) && (
                 <button onClick={() => excluir(r)} className="p-1.5 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={16}/></button>
               )}
             </div>

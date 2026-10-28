@@ -1,4 +1,4 @@
-from tests.conftest import auth, login
+from tests.conftest import auth, create_user, login
 
 
 def _create_card(client, token, autor, **overrides):
@@ -51,6 +51,11 @@ def _user_id(client, token, nome):
     r = client.get("/users", headers=auth(token))
     assert r.status_code == 200
     return next(u["id"] for u in r.json() if u["nome"] == nome)
+
+
+def _user_roles(client, token, user_id):
+    r = client.get("/users", headers=auth(token))
+    return next(u["roles"] for u in r.json() if u["id"] == user_id)
 
 
 def test_seed_roles_exist_and_admin_has_superadmin(client, admin_token):
@@ -107,7 +112,9 @@ def test_anti_escalation_requires_being_superadmin(client, admin_token, joao, ma
 
     maria_id = _user_id(client, admin_token, maria["nome"])
     r2 = _set_user_roles(client, joao_login["token"], maria_id, [roles["Superadmin"]["id"]])
-    assert r2.status_code == 400
+    # Barrado já pela regra de concessão (403): o Superadmin tem permissões que joão não tem.
+    assert r2.status_code == 403
+    assert not any(r["nome"] == "Superadmin" for r in _user_roles(client, admin_token, maria_id))
 
 
 def test_require_permission_blocks_without_role(client, admin_token, maria):
@@ -209,3 +216,71 @@ def test_ver_etapas_backfill_defaults_legacy_roles_true_but_preserves_explicit_f
     _backfill_ver_etapas_permission()  # must not clobber an explicit False
     roles2 = _roles_by_name(client, admin_token)
     assert roles2["LegadoSemVerEtapas"]["permissoes"]["ver_etapas"] is False
+
+
+# ------------------------------------------------------------- sem auto-promoção
+
+def _gestor_de_cargos(client, admin_token, nome, extras=None):
+    """Alguém com gerenciar_cargos (e o que mais vier em extras), sem ser Superadmin."""
+    pessoa = create_user(client, admin_token, nome)
+    cargo = _create_role(client, admin_token, f"Cargos de {nome}", {"gerenciar_cargos": True, **(extras or {})})
+    _set_user_roles(client, admin_token, pessoa["id"], [cargo["id"]])
+    return login(client, nome, "senha123"), cargo
+
+
+def test_cannot_edit_own_role_or_own_roles(client, admin_token):
+    eu, meu_cargo = _gestor_de_cargos(client, admin_token, "auto_promocao")
+    r = client.put(f"/roles/{meu_cargo['id']}", json={"permissoes": {"gerenciar_cargos": True, "excluir_usuarios": True}},
+                   headers=auth(eu["token"]))
+    assert r.status_code == 403
+    assert client.delete(f"/roles/{meu_cargo['id']}", headers=auth(eu["token"])).status_code == 403
+
+    outro = _create_role(client, admin_token, "Cargo fraco", {})
+    assert _set_user_roles(client, eu["token"], eu["id"], [meu_cargo["id"], outro["id"]]).status_code == 403
+    assert [r["id"] for r in _user_roles(client, admin_token, eu["id"])] == [meu_cargo["id"]]
+
+
+def test_can_only_grant_what_you_have(client, admin_token):
+    eu, _ = _gestor_de_cargos(client, admin_token, "concede_o_que_tem", {"editar_card": True})
+    h = auth(eu["token"])
+
+    assert client.post("/roles", json={"nome": "Forte demais", "permissoes": {"excluir_usuarios": True}}, headers=h).status_code == 403
+    ok = client.post("/roles", json={"nome": "Repassa editar", "permissoes": {"editar_card": True}}, headers=h)
+    assert ok.status_code == 200
+
+    # Cargo de outra pessoa com permissão que eu não tenho: não mexo nela.
+    forte = _create_role(client, admin_token, "Forte alheio", {"excluir_usuarios": True})
+    r = client.put(f"/roles/{forte['id']}", json={"permissoes": {}}, headers=h)
+    assert r.status_code == 403
+    assert client.delete(f"/roles/{forte['id']}", headers=h).status_code == 403
+    # ...mas o que eu tenho eu posso ligar nele, desde que não toque no resto.
+    r = client.put(f"/roles/{forte['id']}", json={"permissoes": {"excluir_usuarios": True, "editar_card": True}}, headers=h)
+    assert r.status_code == 200
+
+    alguem = create_user(client, admin_token, "recebe_cargo")
+    assert _set_user_roles(client, eu["token"], alguem["id"], [forte["id"]]).status_code == 403
+    assert _set_user_roles(client, eu["token"], alguem["id"], [ok.json()["id"]]).status_code == 200
+
+
+def test_column_restricted_manager_cannot_widen_columns(client, admin_token):
+    eu, _ = _gestor_de_cargos(client, admin_token, "so_col1_cargos")
+    # Restringe quem gerencia à col-1 pelo cargo dele.
+    cargo = next(r for r in client.get("/roles", headers=auth(admin_token)).json() if r["nome"] == "Cargos de so_col1_cargos")
+    client.put(f"/roles/{cargo['id']}", json={"colunas_restritas": True, "colunas_visiveis": ["col-1"]}, headers=auth(admin_token))
+    h = auth(eu["token"])
+    assert client.post("/roles", json={"nome": "Ve tudo", "permissoes": {}}, headers=h).status_code == 403
+    assert client.post("/roles", json={"nome": "Ve col2", "permissoes": {}, "colunas_restritas": True,
+                                       "colunas_visiveis": ["col-2"]}, headers=h).status_code == 403
+    assert client.post("/roles", json={"nome": "Ve col1", "permissoes": {}, "colunas_restritas": True,
+                                       "colunas_visiveis": ["col-1"]}, headers=h).status_code == 200
+
+
+def test_superadmin_is_exempt(client, admin_token):
+    roles = _roles_by_name(client, admin_token)
+    admin_id = _user_id(client, admin_token, "admin")
+    # Superadmin edita qualquer cargo, inclusive concedendo tudo.
+    forte = _create_role(client, admin_token, "Tudo liberado", {k: True for k in ("excluir_usuarios", "restaurar_alteracoes")})
+    assert forte["permissoes"]["excluir_usuarios"] is True
+    atuais = [r["id"] for r in _user_roles(client, admin_token, admin_id)]
+    assert _set_user_roles(client, admin_token, admin_id, atuais + [forte["id"]]).status_code == 200
+    assert _set_user_roles(client, admin_token, admin_id, [roles["Superadmin"]["id"]]).status_code == 200

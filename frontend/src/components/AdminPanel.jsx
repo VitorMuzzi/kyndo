@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { User, Users, Trash2, ScrollText, Shield } from 'lucide-react';
+import { User, Users, Trash2, ScrollText, Shield, Lock } from 'lucide-react';
 import { API, authFetch } from '../api.js';
 import { hasPermission } from '../constants.jsx';
 import AuditLogPanel from './AuditLogPanel.jsx';
@@ -13,6 +13,13 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   // Seeing the user list only makes sense if you can act on it somehow —
   // create/delete a user, or assign cargos (which needs to see who's who).
   const canSeeUsersTab = canManageUsers || canDeleteUsers || canManageRoles;
+  // Quem gerencia cargos não mexe no próprio acesso e só repassa o que tem
+  // (o servidor confere). O Superadmin fica de fora dessas travas.
+  const eu = currentUsers.find(u => u.id === user.id);
+  const meusCargos = (eu?.roles || []).map(r => r.id);
+  const souSuperadmin = user.role === 'superadmin' || (eu?.roles || []).some(r => r.protegido);
+  const possoRepassar = (role) => souSuperadmin
+    || Object.entries(role.permissoes || {}).every(([k, v]) => !v || hasPermission(user, k));
 
   const [aba, setAba] = useState(() => (canSeeUsersTab ? 'usuarios' : canViewAuditLog ? 'log' : null));
   const [novoNome, setNovoNome] = useState('');
@@ -21,6 +28,7 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   const [rolesDisponiveis, setRolesDisponiveis] = useState([]);
   const [editandoCargosDe, setEditandoCargosDe] = useState(null);
   const [cargosSelecionados, setCargosSelecionados] = useState([]);
+  const [erroCargos, setErroCargos] = useState('');
 
   useEffect(() => {
     if (canManageRoles) authFetch(`${API}/roles`).then(r => (r.ok ? r.json() : [])).then(setRolesDisponiveis);
@@ -53,15 +61,21 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   };
 
   const abrirEdicaoCargos = (u) => {
+    setErroCargos('');
     setEditandoCargosDe(u.id);
     setCargosSelecionados((u.roles || []).map(r => r.id));
   };
 
   const salvarCargos = async (userId) => {
-    await authFetch(`${API}/users/${userId}/roles`, {
+    const res = await authFetch(`${API}/users/${userId}/roles`, {
       method: 'PUT',
       body: JSON.stringify({ role_ids: cargosSelecionados }),
     });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setErroCargos(data.detail || 'Não foi possível salvar os cargos.');
+      return;
+    }
     setEditandoCargosDe(null);
     refreshUsers();
   };
@@ -101,7 +115,7 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
           </div>
         ) : aba === 'cargos' && canManageRoles ? (
           <div className="p-8">
-            <RolesPanel/>
+            <RolesPanel user={user} meusCargos={meusCargos} souSuperadmin={souSuperadmin}/>
           </div>
         ) : aba === 'usuarios' && canSeeUsersTab ? (
         <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -142,10 +156,13 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {canManageRoles && (
+                        {canManageRoles && (u.id !== user.id || souSuperadmin) && (
                           <button onClick={() => (editandoCargosDe === u.id ? setEditandoCargosDe(null) : abrirEdicaoCargos(u))} className="text-xs font-bold text-emerald-400 hover:underline">
                             {editandoCargosDe === u.id ? 'Cancelar' : 'Cargos'}
                           </button>
+                        )}
+                        {canManageRoles && u.id === user.id && !souSuperadmin && (
+                          <span className="text-[10px] text-slate-500" title="Seus cargos só podem ser mudados por outra pessoa">seus cargos</span>
                         )}
                         {canDeleteUsers && !isProtected && (
                           <button onClick={() => deletarUsuario(u.id)} className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"><Trash2 size={18}/></button>
@@ -154,17 +171,24 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                     </div>
                     {editandoCargosDe === u.id && (
                       <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
-                        {rolesDisponiveis.map(r => (
-                          <label key={r.id} className="flex items-center gap-2 text-sm text-slate-300">
-                            <input
-                              type="checkbox"
-                              checked={cargosSelecionados.includes(r.id)}
-                              onChange={e => setCargosSelecionados(prev => e.target.checked ? [...prev, r.id] : prev.filter(id => id !== r.id))}
-                            />
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: r.cor }}/>
-                            {r.nome}
-                          </label>
-                        ))}
+                        {rolesDisponiveis.map(r => {
+                          const bloqueado = !possoRepassar(r);
+                          return (
+                            <label key={r.id} className={`flex items-center gap-2 text-sm ${bloqueado ? 'text-slate-500' : 'text-slate-300'}`}
+                              title={bloqueado ? 'Este cargo tem permissões que você não tem — não dá para você dar nem tirar' : undefined}>
+                              <input
+                                type="checkbox"
+                                disabled={bloqueado}
+                                checked={cargosSelecionados.includes(r.id)}
+                                onChange={e => setCargosSelecionados(prev => e.target.checked ? [...prev, r.id] : prev.filter(id => id !== r.id))}
+                              />
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: r.cor }}/>
+                              {r.nome}
+                              {bloqueado && <Lock size={11} className="text-slate-600"/>}
+                            </label>
+                          );
+                        })}
+                        {erroCargos && <p className="text-xs font-bold text-red-400">{erroCargos}</p>}
                         <button onClick={() => salvarCargos(u.id)} className="mt-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold">Salvar cargos</button>
                       </div>
                     )}

@@ -28,7 +28,9 @@ from models import (
 )
 from rbac import PERMISSIONS, get_user_permissions, get_visible_column_ids, is_superadmin
 from routers.columns import coluna_de
-from routers.roles import cargo_de, validar_troca_de_cargos
+from routers.roles import (
+    cargo_de, checar_atribuicao, checar_cargo_proprio, checar_colunas, checar_concessao, validar_troca_de_cargos,
+)
 from routers.suggestions import apagar_sugestao, decisao_de
 
 
@@ -655,6 +657,14 @@ def _desfazer_decisao(ctx):
 
 # ------------------------------------------------------------ usuários e cargos
 
+def _regra(funcao, *args):
+    """As regras de cargo do router levantam HTTPException; aqui viram Conflito."""
+    try:
+        funcao(*args)
+    except HTTPException as e:
+        raise Conflito(e.detail)
+
+
 def _checar_superadmin(ctx, alvo_ids_de_cargo):
     protegidos = {r.id for r in ctx.db.query(RoleDB).filter(RoleDB.protegido == True).all()}  # noqa: E712
     if protegidos & set(alvo_ids_de_cargo) and not is_superadmin(ctx.db, ctx.usuario):
@@ -708,10 +718,8 @@ def _desfazer_cargos_do_usuario(ctx):
     faltando = [rid for rid in r["antes"] if rid not in existentes]
     if faltando:
         raise Conflito("Um dos cargos de antes foi excluído — recupere-o primeiro.")
-    try:
-        validar_troca_de_cargos(ctx.db, ctx.usuario, user.id, set(r["antes"]))
-    except HTTPException as e:
-        raise Conflito(e.detail)
+    _regra(checar_atribuicao, ctx.db, ctx.usuario, user.id, set(r["antes"]))
+    _regra(validar_troca_de_cargos, ctx.db, ctx.usuario, user.id, set(r["antes"]))
     ctx.db.query(UserRoleDB).filter(UserRoleDB.user_id == user.id).delete()
     for rid in r["antes"]:
         ctx.db.add(UserRoleDB(user_id=user.id, role_id=rid))
@@ -727,6 +735,8 @@ def _desfazer_existencia_cargo(ctx):
         raise Conflito("Este cargo já não existe mais.")
     if role.protegido:
         raise Conflito("O cargo protegido não pode ser removido.")
+    _regra(checar_cargo_proprio, ctx.db, ctx.usuario, role.id)
+    _regra(checar_concessao, ctx.db, ctx.usuario, {}, role.permissoes)
     titulares = sorted(v.user_id for v in ctx.db.query(UserRoleDB).filter(UserRoleDB.role_id == role.id).all())
     esperados = sorted(ctx.r.get("usuarios") or [])
     if titulares != esperados:
@@ -748,6 +758,9 @@ def _desfazer_alteracao_cargo(ctx):
     quem = ctx.por_quem(alvo_id=role.id, filtro=lambda l: l.acao == "cargo_alterado")
     if quem or cargo_de(role) != r["depois"]:
         raise Conflito(f"O cargo foi alterado de novo depois{quem}.")
+    _regra(checar_cargo_proprio, ctx.db, ctx.usuario, role.id)
+    _regra(checar_concessao, ctx.db, ctx.usuario, r["antes"]["permissoes"], role.permissoes)
+    _regra(checar_colunas, ctx.db, ctx.usuario, r["antes"]["colunas_visiveis"])
     if r["antes"]["nome"] != role.nome and ctx.db.query(RoleDB).filter(RoleDB.nome == r["antes"]["nome"]).first():
         raise Conflito(f'Já existe outro cargo chamado "{r["antes"]["nome"]}".')
     atual = cargo_de(role)
@@ -759,6 +772,9 @@ def _desfazer_alteracao_cargo(ctx):
 
 def _desfazer_exclusao_cargo(ctx):
     item = _da_lixeira(ctx)
+    cargo = item.dados["cargo"]
+    _regra(checar_concessao, ctx.db, ctx.usuario, cargo.get("permissoes"))
+    _regra(checar_colunas, ctx.db, ctx.usuario, cargo.get("colunas_visiveis"))
     role, usuarios = recuperar_cargo(ctx.db, item.dados)
     ctx.db.delete(item)
     ctx.mensagem = f"Cargo recuperado e devolvido a {len(usuarios)} pessoa(s)."

@@ -7,7 +7,7 @@ from audit import _mk_log
 from database import get_db
 from lixeira import excluir_cargo
 from models import RoleDB, UserDB, UserRoleDB
-from rbac import PERMISSIONS, require_permission
+from rbac import PERMISSIONS, get_user_permissions, get_visible_column_ids, is_superadmin, require_permission
 from schemas import RoleCreate, RoleUpdate, UserRolesUpdate
 from security import get_current_user
 
@@ -19,6 +19,66 @@ CAMPOS_CARGO = ("nome", "cor", "permissoes", "colunas_visiveis")
 
 def cargo_de(r: RoleDB):
     return {c: getattr(r, c) for c in CAMPOS_CARGO}
+
+
+# ------------------------------------------------------------------
+# Quem gerencia cargos não pode usar isso pra subir o próprio acesso:
+#  1. não mexe em cargo que tem, nem nos próprios cargos;
+#  2. só concede (ou retira) permissão e coluna que ele mesmo tem.
+# Assim o máximo que alguém consegue é repassar o que já tem. O Superadmin
+# fica de fora das duas regras — ele já tem tudo. Usadas também ao desfazer
+# pela auditoria (reversao.py), pra que desfazer não vire atalho.
+
+def _ligadas(permissoes):
+    return {k for k, v in (permissoes or {}).items() if v}
+
+
+def _negar(detalhe):
+    raise HTTPException(status_code=403, detail=detalhe)
+
+
+def checar_cargo_proprio(db, actor, role_id):
+    if is_superadmin(db, actor):
+        return
+    if db.query(UserRoleDB).filter(UserRoleDB.user_id == actor.id, UserRoleDB.role_id == role_id).first():
+        _negar("Você não pode alterar um cargo que você mesmo tem — peça a outra pessoa.")
+
+
+def checar_concessao(db, actor, novas, antigas=None):
+    """Toda permissão que muda de estado (ligada ou desligada) tem que ser
+    uma que o actor tem."""
+    if is_superadmin(db, actor):
+        return
+    fora = sorted((_ligadas(novas) ^ _ligadas(antigas)) - get_user_permissions(db, actor.id))
+    if fora:
+        nomes = ", ".join(f'"{PERMISSIONS.get(k, k)}"' for k in fora)
+        _negar(f"Você não pode conceder nem retirar permissões que você não tem: {nomes}.")
+
+
+def checar_colunas(db, actor, colunas_visiveis):
+    """Quem só enxerga algumas colunas não cria cargo que enxergue mais que ele."""
+    if is_superadmin(db, actor):
+        return
+    minhas = get_visible_column_ids(db, actor.id)
+    if minhas is None:
+        return
+    if colunas_visiveis is None or set(colunas_visiveis) - minhas:
+        _negar("Você não pode dar acesso a colunas que você mesmo não vê.")
+
+
+def checar_atribuicao(db, actor, user_id, novos_ids):
+    if is_superadmin(db, actor):
+        return
+    if user_id == actor.id:
+        _negar("Você não pode alterar os próprios cargos — peça a outra pessoa.")
+    atuais = {v.role_id for v in db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).all()}
+    for role in db.query(RoleDB).filter(RoleDB.id.in_(atuais ^ set(novos_ids))).all():
+        try:
+            checar_concessao(db, actor, role.permissoes)
+            checar_colunas(db, actor, role.colunas_visiveis)
+        except HTTPException:
+            _negar(f'O cargo "{role.nome}" tem permissões ou colunas que você não tem — '
+                   "você não pode dar nem tirar esse cargo de ninguém.")
 
 
 def validar_troca_de_cargos(db, actor, user_id, novos_ids):
@@ -62,6 +122,8 @@ def list_permissions(current_user: UserDB = Depends(get_current_user)):
 
 @router.post("/roles")
 def create_role(body: RoleCreate, db: Session = Depends(get_db), current_user: UserDB = Depends(require_permission("gerenciar_cargos"))):
+    checar_concessao(db, current_user, body.permissoes)
+    checar_colunas(db, current_user, body.colunas_visiveis if body.colunas_restritas else None)
     novo = RoleDB(
         id=f"role-{uuid.uuid4().hex[:8]}", nome=body.nome, cor=body.cor,
         permissoes=body.permissoes, protegido=False, ordem=db.query(RoleDB).count(),
@@ -82,6 +144,11 @@ def update_role(role_id: str, body: RoleUpdate, db: Session = Depends(get_db), c
         raise HTTPException(status_code=404, detail="Cargo não encontrado")
     if role.protegido:
         raise HTTPException(status_code=400, detail="Este cargo é protegido e não pode ser editado")
+    checar_cargo_proprio(db, current_user, role.id)
+    if body.permissoes is not None:
+        checar_concessao(db, current_user, body.permissoes, role.permissoes)
+    if body.colunas_restritas is not None:
+        checar_colunas(db, current_user, (body.colunas_visiveis or []) if body.colunas_restritas else None)
     antes = cargo_de(role)
     if body.nome is not None:
         role.nome = body.nome
@@ -108,6 +175,9 @@ def delete_role(role_id: str, db: Session = Depends(get_db), current_user: UserD
         raise HTTPException(status_code=404, detail="Cargo não encontrado")
     if role.protegido:
         raise HTTPException(status_code=400, detail="Este cargo é protegido e não pode ser excluído")
+    checar_cargo_proprio(db, current_user, role.id)
+    # Excluir tira as permissões de quem tem o cargo — vale a mesma regra de concessão.
+    checar_concessao(db, current_user, {}, role.permissoes)
     lixeira_id = excluir_cargo(db, role, current_user.nome)
     _mk_log(db, None, role.nome, current_user.nome, "cargo_excluido", alvo_tipo="cargo", alvo_id=role.id,
             lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id})
@@ -122,6 +192,7 @@ def set_user_roles(user_id: str, body: UserRolesUpdate, db: Session = Depends(ge
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
     new_role_ids = set(body.role_ids)
+    checar_atribuicao(db, current_user, user_id, new_role_ids)
     validar_troca_de_cargos(db, current_user, user_id, new_role_ids)
 
     antes = sorted(r.role_id for r in db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).all())
