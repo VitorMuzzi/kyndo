@@ -56,6 +56,8 @@ const ACAO_LABELS = {
   usuario_criado: 'criou o usuário',
   usuario_excluido: 'excluiu o usuário',
   usuario_restaurado: 'recuperou o usuário',
+  usuario_renomeado: 'renomeou o usuário',
+  senha_redefinida: 'definiu uma senha temporária para',
   cargos_do_usuario_alterados: 'alterou os cargos de',
   cargo_criado: 'criou o cargo',
   cargo_alterado: 'alterou o cargo',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff } from 'lucide-react';
+import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff, Settings } from 'lucide-react';
 
 import { API, authFetch } from './api.js';
 import { APP_VERSION, PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon } from './constants.jsx';
@@ -31,6 +31,7 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [cronometro, setCronometro] = useState(null);  // o cronômetro em andamento de quem está logado
   const [activeMenu, setActiveMenu]     = useState(null);
+  const [pedidosSenha, setPedidosSenha] = useState(0);  // "esqueci a senha" esperando quem pode atender
   const [isSyncing, setIsSyncing]       = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(false);
@@ -153,10 +154,12 @@ export default function App() {
       // ficariam congeladas na sessão até o próximo login.
       const pRes = await authFetch(`${API}/me/permissions`);
       if (pRes.ok) {
-        const { permissions } = await pRes.json();
+        const { permissions, nome, pedidos_senha } = await pRes.json();
+        setPedidosSenha(pedidos_senha || 0);
         setUser(u => {
-          if (!u || JSON.stringify(u.permissions || []) === JSON.stringify(permissions)) return u;
-          const atualizado = { ...u, permissions };
+          // O nome também pode mudar: alguém renomeou esta conta.
+          if (!u || (JSON.stringify(u.permissions || []) === JSON.stringify(permissions) && (!nome || u.nome === nome))) return u;
+          const atualizado = { ...u, permissions, nome: nome || u.nome };
           sessionStorage.setItem('demandaflow_user', JSON.stringify(atualizado));
           return atualizado;
         });
@@ -413,7 +416,7 @@ export default function App() {
   const canManageColumns = hasPermission(user, 'gerenciar_colunas');
   const canReorderCards = hasPermission(user, 'reordenar_cards');
   const canCreateCardAnywhere = hasPermission(user, 'criar_card_coluna_privada');
-  const canAccessAdminPanel = ['gerenciar_usuarios', 'excluir_usuarios', 'gerenciar_cargos', 'ver_log_auditoria']
+  const canAccessAdminPanel = ['gerenciar_usuarios', 'excluir_usuarios', 'gerenciar_cargos', 'ver_log_auditoria', 'trocar_senha_outros']
     .some(key => hasPermission(user, key));
   const cardsArray = Object.values(cards);
 
@@ -592,8 +595,11 @@ export default function App() {
               <span className="font-bold text-xs md:text-sm truncate max-w-[80px] md:max-w-none">{user.nome}</span>
             </div>
             {canAccessAdminPanel && (
-              <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }} className="text-[10px] md:text-xs bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 px-2 md:px-3 py-1 rounded font-bold uppercase transition-colors shadow-md">
-                Config
+              <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }}
+                className="relative p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                title={pedidosSenha > 0 ? `Configurações — ${pedidosSenha} pedido(s) de nova senha` : 'Configurações'}>
+                <Settings size={18} />
+                {pedidosSenha > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-slate-800" />}
               </button>
             )}
             <button onClick={handleLogout} className="text-red-300 hover:text-red-100 p-1 ml-1 md:ml-2 transition-colors border-l border-white/20 pl-2 md:pl-4" title="Sair">
@@ -651,7 +657,7 @@ export default function App() {
         style={{ paddingTop: headerPinned ? headerHeight + 12 : undefined }}
       >
         <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
-          <div className="relative min-h-full md:h-full w-full">
+          <div className="relative min-h-full md:h-full w-full md:w-max md:min-w-full">
             <Droppable droppableId="board" direction="horizontal" type="column">
               {(provided) => (
                 <div {...provided.droppableProps} ref={provided.innerRef} className="flex flex-col md:flex-row gap-4 items-start w-full md:h-full">
@@ -659,7 +665,7 @@ export default function App() {
                     <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={!canManageColumns}>
                       {(p, snapshot) => (
                         <div ref={p.innerRef} {...p.draggableProps}
-                          className={`w-full md:flex-1 md:min-w-[220px] flex flex-col rounded-2xl shadow-xl border border-t-[6px] border-slate-800 min-h-[120px] max-h-[calc(100dvh-4rem)] md:max-h-full transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
+                          className={`w-full md:w-[220px] md:flex-[1_0_220px] flex flex-col rounded-2xl shadow-xl border border-t-[6px] border-slate-800 min-h-[120px] max-h-[calc(100dvh-4rem)] md:max-h-full transition-transform ${snapshot.isDragging ? 'rotate-[2deg] scale-105 z-50 ring-2 ring-emerald-400' : ''}`}
                           style={{ ...p.draggableProps.style, borderTopColor: col.cor, background: `linear-gradient(180deg, ${col.cor}2e 0%, #0f172a 60%)` }}>
 
                           <div {...p.dragHandleProps} className="p-3 pl-4 flex items-center justify-between gap-2 relative shrink-0">

@@ -15,6 +15,16 @@ class UserCreate(BaseModel):
 
 class PasswordUpdate(BaseModel):
     nova_senha: str
+    # Obrigatória ao trocar a própria senha (exceto a temporária do primeiro login).
+    senha_atual: Optional[str] = None
+
+
+class UserRename(BaseModel):
+    nome: str
+
+
+class EsqueciSenha(BaseModel):
+    nome: str
 
 
 class ColSchema(BaseModel):

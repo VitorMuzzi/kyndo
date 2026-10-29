@@ -27,6 +27,7 @@ from models import (
     RoleDB, SuggestionDB, TimeEntryDB, UserDB, UserNoteDB, UserRoleDB,
 )
 from rbac import PERMISSIONS, get_user_permissions, get_visible_column_ids, is_superadmin
+from renomear import renomear_usuario, validar_nome
 from routers.columns import coluna_de
 from routers.roles import (
     cargo_de, checar_atribuicao, checar_cargo_proprio, checar_colunas, checar_concessao, validar_troca_de_cargos,
@@ -695,6 +696,23 @@ def _desfazer_existencia_usuario(ctx):
                   lixeira_id=lixeira_id, reversao={"lixeira_id": lixeira_id})
 
 
+def _desfazer_renomeacao(ctx):
+    r = ctx.r
+    user = ctx.db.query(UserDB).filter(UserDB.id == r["user_id"]).first()
+    if user is None:
+        raise Conflito("Este usuário não existe mais (está na lixeira?).")
+    quem = ctx.por_quem(alvo_id=user.id, filtro=lambda l: l.acao == "usuario_renomeado")
+    if quem or user.nome != r["depois"]:
+        raise Conflito(f"{user.nome} foi renomeado de novo depois{quem}.")
+    if is_superadmin(ctx.db, user) and not is_superadmin(ctx.db, ctx.usuario):
+        raise Conflito("Só um Superadmin pode renomear outro Superadmin.")
+    _regra(validar_nome, ctx.db, r["antes"], user.id)
+    renomear_usuario(ctx.db, user, r["antes"])
+    ctx.registrar(None, user.nome, "usuario_renomeado", alvo_tipo="usuario", alvo_id=user.id,
+                  valor_antigo=r["depois"], valor_novo=r["antes"],
+                  reversao={"user_id": user.id, "antes": r["depois"], "depois": r["antes"]})
+
+
 def _desfazer_exclusao_usuario(ctx):
     item = _da_lixeira(ctx)
     _checar_superadmin(ctx, item.dados.get("cargos") or [])
@@ -866,6 +884,7 @@ TRATADORES = {
     "usuario_criado": _desfazer_existencia_usuario,
     "usuario_restaurado": _desfazer_existencia_usuario,
     "usuario_excluido": _desfazer_exclusao_usuario,
+    "usuario_renomeado": _desfazer_renomeacao,
     "cargos_do_usuario_alterados": _desfazer_cargos_do_usuario,
     "cargo_criado": _desfazer_existencia_cargo,
     "cargo_restaurado": _desfazer_existencia_cargo,

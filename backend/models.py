@@ -193,3 +193,13 @@ class DrawingDB(Base):
     card_id = Column(String, nullable=True, default=None)
     publico = Column(Boolean, default=False)
     compartilhado_com = Column(JSON, default=list)
+
+
+class PedidoSenhaDB(Base):
+    """Pedido de "esqueci a senha". Não há e-mail no sistema, então o pedido fica
+    esperando alguém com trocar_senha_outros definir uma senha temporária.
+    Sai daqui quando a senha muda (por qualquer um) ou a pessoa entra."""
+    __tablename__ = "pedidos_senha"
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, index=True)
+    criado_em = Column(String)
