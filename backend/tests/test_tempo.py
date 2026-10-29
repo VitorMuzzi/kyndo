@@ -139,6 +139,31 @@ def test_only_own_entry_can_be_deleted(client, admin_token):
     assert _atual(client, dono["token"]) is None
 
 
+def test_finished_entry_can_be_linked_to_a_step_later(client, admin_token):
+    dono = create_user(client, admin_token, "crono_vincula")
+    outro = create_user(client, admin_token, "crono_vincula_outro")
+    card = _create_card(client, admin_token, "admin", checklist=[
+        {"id": "v-1", "texto": "Etapa", "concluido": False, "subetapas": [
+            {"id": "v-1a", "texto": "Sub", "concluido": False}]},
+    ])
+    entry_id = _iniciar(client, dono["token"], card["id"]).json()["id"]
+    _recuar_inicio(entry_id, 120)
+    client.post("/tempo/parar", headers=auth(dono["token"]))
+    assert _tempo(client, dono["token"], card["id"])["por_etapa"] == {}
+
+    url = f"/tempo/{entry_id}"
+    assert client.put(url, json={"item_id": "v-1a"}, headers=auth(outro["token"])).status_code == 403
+    assert client.put(url, json={"item_id": "nao-existe"}, headers=auth(dono["token"])).status_code == 400
+    assert client.put(url, json={"item_id": "v-1a"}, headers=auth(dono["token"])).status_code == 200
+    tempo = _tempo(client, dono["token"], card["id"])
+    assert tempo["por_etapa"]["v-1a"] >= 120
+    assert tempo["registros"][0]["item_id"] == "v-1a"
+
+    # Voltar para o card inteiro.
+    assert client.put(url, json={"item_id": None}, headers=auth(dono["token"])).status_code == 200
+    assert _tempo(client, dono["token"], card["id"])["por_etapa"] == {}
+
+
 def test_deleting_card_removes_its_time_entries(client, admin_token):
     card = _create_card(client, admin_token, "admin")
     _iniciar(client, admin_token, card["id"])

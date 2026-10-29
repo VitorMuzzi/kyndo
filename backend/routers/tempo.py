@@ -158,6 +158,27 @@ def tempo_do_card(card_id: str, db: Session = Depends(get_db), current_user: Use
     }
 
 
+@router.put("/tempo/{entry_id}")
+def vincular_etapa(entry_id: str, body: IniciarTempo, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    """Troca a etapa de um registro já feito (ou do que está rodando) — pra
+    quem esqueceu de escolher a etapa ao ligar, ou escolheu a errada. Só o
+    próprio registro, como apagar. item_id nulo = card inteiro."""
+    entry = db.query(TimeEntryDB).filter(TimeEntryDB.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Registro não encontrado")
+    if entry.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Só dá pra alterar o próprio registro de tempo")
+    card = db.query(CardDB).filter(CardDB.id == entry.card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    _assert_card_visible(db, current_user, card)
+    if body.item_id and body.item_id not in _etapas_por_id(card.checklist):
+        raise HTTPException(status_code=400, detail="Etapa não encontrada neste card")
+    entry.item_id = body.item_id or None
+    db.commit()
+    return {"ok": True, "item_id": entry.item_id}
+
+
 @router.delete("/tempo/{entry_id}")
 def apagar_registro(entry_id: str, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
     """Pra corrigir engano (ligou no card errado, esqueceu ligado). Só o

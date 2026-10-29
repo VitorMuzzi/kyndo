@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Play, Square, Timer, Trash2 } from 'lucide-react';
 import { API, authFetch } from '../api.js';
 import { userColor } from '../constants.jsx';
-import { formatarDuracao, formatarRelogio, iniciarCronometro, pararCronometro, segundosDesde, useAgora, useDecorrido } from '../cronometro.js';
+import { buscarCronometroAtual, formatarDuracao, formatarRelogio, iniciarCronometro, pararCronometro, segundosDesde, useAgora, useDecorrido } from '../cronometro.js';
 
 const REGISTROS_VISIVEIS = 5;
 
@@ -60,6 +60,23 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
     } catch (e) {
       setErro(e.message);
     }
+  };
+
+  // Vincular (ou trocar) a etapa de um registro já feito — o próprio.
+  const vincularEtapa = async (id, itemId) => {
+    setErro('');
+    const res = await authFetch(`${API}/tempo/${id}`, { method: 'PUT', body: JSON.stringify({ item_id: itemId || null }) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setErro(data.detail || 'Não foi possível vincular a etapa.');
+      return;
+    }
+    // O que está rodando mostra a etapa no cronômetro flutuante também.
+    if (cronometro?.id === id) {
+      const atual = await buscarCronometroAtual();
+      if (atual !== undefined) onCronometroChange(atual);
+    }
+    carregar();
   };
 
   const apagarRegistro = async (id) => {
@@ -174,7 +191,18 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
             <div key={r.id} className="flex items-center gap-2 text-xs py-1 group">
               <span className="text-slate-500 font-mono shrink-0">{formatarInicio(r.inicio)}</span>
               {dados.pode_ver_equipe && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${userColor(r.usuario)}`}>{r.usuario}</span>}
-              <span className="text-slate-400 truncate flex-1">{mostrarEtapas && r.item_id ? textoDaEtapa(r.item_id) : ''}</span>
+              {r.meu && mostrarEtapas && etapas.length > 0 ? (
+                <select value={r.item_id || ''} onChange={e => vincularEtapa(r.id, e.target.value)} title="Vincular a uma etapa"
+                  className={`flex-1 min-w-0 truncate bg-transparent border border-transparent hover:border-slate-700 focus:border-emerald-400 rounded px-1 py-0.5 outline-none cursor-pointer ${r.item_id ? 'text-slate-300' : 'text-slate-600 italic'}`}>
+                  <option value="">sem etapa</option>
+                  {r.item_id && !etapas.some(e => e.id === r.item_id) && <option value={r.item_id}>Etapa removida</option>}
+                  {etapas.map(e => (
+                    <option key={e.id} value={e.id}>{e.nivel === 1 ? '   ↳ ' : ''}{e.texto}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-slate-400 truncate flex-1">{mostrarEtapas && r.item_id ? textoDaEtapa(r.item_id) : ''}</span>
+              )}
               <span className="font-mono text-slate-300 shrink-0">
                 {r.fim ? formatarDuracao(r.segundos) : <span className="text-emerald-300">em andamento</span>}
               </span>
