@@ -1,15 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { Play, Square, Timer, Trash2 } from 'lucide-react';
+import { MoreHorizontal, Play, Square, Timer, Trash2 } from 'lucide-react';
 import { API, authFetch } from '../api.js';
 import { userColor } from '../constants.jsx';
 import { buscarCronometroAtual, formatarDuracao, formatarRelogio, iniciarCronometro, pararCronometro, segundosDesde, useAgora, useDecorrido } from '../cronometro.js';
 
-const REGISTROS_VISIVEIS = 5;
+const SEM_ETAPA = '';
+const TUDO = '*';  // quem não vê etapas: um grupo só, o card inteiro
 
-const formatarInicio = (iso) => {
+const dataHora = (iso) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+// Fim no mesmo dia do início mostra só a hora: "29/10/2026 08:01 → 08:17".
+const fimDoPeriodo = (inicio, fim) => {
+  const a = new Date(inicio);
+  const b = new Date(fim);
+  if (Number.isNaN(b.getTime())) return '';
+  return a.toDateString() === b.toDateString()
+    ? b.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : dataHora(fim);
 };
 
 // Etapas e sub-etapas numa lista só, na ordem do card, pra escolha e pra nome.
@@ -26,13 +37,13 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
   const [dados, setDados] = useState(null);
   const [etapaEscolhida, setEtapaEscolhida] = useState('');
   const [erro, setErro] = useState('');
-  const [verTodos, setVerTodos] = useState(false);
+  const [aberta, setAberta] = useState(null);  // tarefa com o histórico de períodos aberto
 
   const rodandoAqui = cronometro?.card_id === cardId;
   const decorrido = useDecorrido(rodandoAqui ? cronometro : null);
   const agora = useAgora(rodandoAqui);
   const etapas = listarEtapas(checklistSalvo);
-  const textoDaEtapa = (id) => etapas.find(e => e.id === id)?.texto || 'Etapa removida';
+  const usaEtapas = mostrarEtapas && etapas.length > 0;
 
   const carregar = () => {
     authFetch(`${API}/cards/${cardId}/tempo`)
@@ -62,13 +73,13 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
     }
   };
 
-  // Vincular (ou trocar) a etapa de um registro já feito — o próprio.
-  const vincularEtapa = async (id, itemId) => {
+  // Mover um período próprio para outra tarefa (ou para "sem etapa").
+  const moverPeriodo = async (id, itemId) => {
     setErro('');
     const res = await authFetch(`${API}/tempo/${id}`, { method: 'PUT', body: JSON.stringify({ item_id: itemId || null }) });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setErro(data.detail || 'Não foi possível vincular a etapa.');
+      setErro(data.detail || 'Não foi possível mover o período.');
       return;
     }
     // O que está rodando mostra a etapa no cronômetro flutuante também.
@@ -79,10 +90,10 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
     carregar();
   };
 
-  const apagarRegistro = async (id) => {
-    if (!window.confirm('Apagar este registro de tempo?')) return;
+  const apagarPeriodo = async (id) => {
+    if (!window.confirm('Apagar este período de tempo?')) return;
     const res = await authFetch(`${API}/tempo/${id}`, { method: 'DELETE' });
-    if (!res.ok) { setErro('Não foi possível apagar o registro.'); return; }
+    if (!res.ok) { setErro('Não foi possível apagar o período.'); return; }
     if (cronometro?.id === id) onCronometroChange(null);
     else carregar();
   };
@@ -90,17 +101,40 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
   // Os totais vêm do servidor na hora da busca; o cronômetro próprio rodando
   // aqui continua somando na tela até a próxima busca.
   const extra = rodandoAqui && dados ? segundosDesde(dados, agora) : 0;
+  const total = (dados?.total_segundos || 0) + extra;
   const registros = dados?.registros || [];
-  const registrosVisiveis = verTodos ? registros : registros.slice(0, REGISTROS_VISIVEIS);
+
   // A linha de quem está com o cronômetro rodando aqui soma ao vivo, como o total.
   const porPessoa = (dados?.por_pessoa || [])
     .map(p => (p.usuario === usuario ? { ...p, segundos: p.segundos + extra } : p))
     .sort((a, b) => b.segundos - a.segundos);
   if (rodandoAqui && dados && !porPessoa.some(p => p.usuario === usuario)) porPessoa.push({ usuario, segundos: extra });
   const maxPessoa = Math.max(1, ...porPessoa.map(p => p.segundos));
-  const etapasComTempo = mostrarEtapas
-    ? Object.entries(dados?.por_etapa || {}).sort((a, b) => b[1] - a[1])
-    : [];
+
+  // Por tarefa: o tempo de todas as vezes que alguém trabalhou nela, somado.
+  // O total por tarefa é de todo mundo; os períodos (horários) seguem a
+  // mesma regra do servidor — os seus, ou de todos com ver_tempo_equipe.
+  let tarefas = [];
+  if (dados && total > 0) {
+    if (usaEtapas) {
+      const porEtapa = { ...dados.por_etapa };
+      if (rodandoAqui && cronometro.item_id) porEtapa[cronometro.item_id] = (porEtapa[cronometro.item_id] || 0) + extra;
+      const conhecidas = new Set(etapas.map(e => e.id));
+      tarefas = [
+        ...etapas.filter(e => porEtapa[e.id] > 0).map(e => ({ id: e.id, texto: e.texto, nivel: e.nivel, segundos: porEtapa[e.id] })),
+        ...Object.keys(porEtapa).filter(id => !conhecidas.has(id) && porEtapa[id] > 0)
+          .map(id => ({ id, texto: 'Etapa removida', nivel: 0, segundos: porEtapa[id], removida: true })),
+      ];
+      const semEtapa = total - Object.values(porEtapa).reduce((s, v) => s + v, 0);
+      if (semEtapa > 0) tarefas.push({ id: SEM_ETAPA, texto: 'Card inteiro (sem etapa)', nivel: 0, segundos: semEtapa, semEtapa: true });
+    } else {
+      tarefas = [{ id: TUDO, texto: 'Card inteiro', nivel: 0, segundos: total, semEtapa: true }];
+    }
+  }
+  const periodosDe = (tarefa) => registros
+    .filter(r => tarefa.id === TUDO || (r.item_id || SEM_ETAPA) === tarefa.id)
+    .sort((a, b) => a.inicio.localeCompare(b.inicio));
+  const tarefaRodando = rodandoAqui ? (usaEtapas ? (cronometro.item_id || SEM_ETAPA) : TUDO) : null;
 
   return (
     <div className="space-y-3">
@@ -108,7 +142,7 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
         <div className="flex items-center gap-2 text-slate-300 font-bold text-sm"><Timer size={16}/> Tempo</div>
         {dados && (
           <div className="text-[11px] text-slate-400">
-            Total <span className="font-bold text-slate-200">{formatarDuracao(dados.total_segundos + extra)}</span>
+            Total <span className="font-bold text-slate-200">{formatarDuracao(total)}</span>
             <span className="mx-1.5 text-slate-600">·</span>
             Seu <span className="font-bold text-slate-200">{formatarDuracao(dados.meu_total_segundos + extra)}</span>
           </div>
@@ -132,7 +166,7 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
       ) : (
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            {mostrarEtapas && etapas.length > 0 && (
+            {usaEtapas && (
               <select value={etapaEscolhida} onChange={e => setEtapaEscolhida(e.target.value)}
                 className="flex-1 min-w-[160px] text-xs bg-slate-900 text-slate-100 border border-slate-700 rounded-lg px-2 py-2 outline-none focus:border-emerald-400">
                 <option value="">Card inteiro (sem etapa)</option>
@@ -155,6 +189,64 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
 
       {erro && <div className="text-xs text-red-400">{erro}</div>}
 
+      {tarefas.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por tarefa</div>
+          {tarefas.map(t => {
+            const periodos = periodosDe(t);
+            const expandida = aberta === t.id;
+            return (
+              <div key={t.id || 'sem-etapa'} className={`rounded-lg ${expandida ? 'bg-slate-900/60 border border-slate-700/70' : ''}`}>
+                <div className="flex items-center gap-2 text-xs px-1.5 py-1">
+                  {tarefaRodando === t.id && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" title="Cronômetro rodando aqui"/>}
+                  <span className={`flex-1 min-w-0 truncate ${t.nivel === 1 ? 'pl-3' : ''} ${t.semEtapa || t.removida ? 'text-slate-400 italic' : 'text-slate-200'}`}>
+                    {t.nivel === 1 && <span className="text-slate-600">↳ </span>}{t.texto}
+                  </span>
+                  <span className="font-mono text-slate-200 shrink-0">{formatarDuracao(t.segundos)}</span>
+                  <button onClick={() => setAberta(expandida ? null : t.id)} disabled={periodos.length === 0}
+                    title={periodos.length ? 'Ver quando foi trabalhado' : 'Sem períodos seus aqui'}
+                    className={`shrink-0 p-0.5 rounded transition-colors ${expandida ? 'text-emerald-300 bg-white/10' : 'text-slate-500 hover:text-slate-200 hover:bg-white/10'} disabled:opacity-30 disabled:hover:bg-transparent`}>
+                    <MoreHorizontal size={14}/>
+                  </button>
+                </div>
+                {expandida && (
+                  <div className="px-2 pb-2 pt-1 space-y-1 border-t border-slate-700/70">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      {dados.pode_ver_equipe ? 'Períodos trabalhados' : 'Seus períodos'} ({periodos.length})
+                    </div>
+                    {periodos.map(r => (
+                      <div key={r.id} className="flex items-center gap-2 text-[11px] group">
+                        <span className="font-mono text-slate-300 shrink-0">
+                          {dataHora(r.inicio)} → {r.fim ? fimDoPeriodo(r.inicio, r.fim) : <span className="text-emerald-300">em andamento</span>}
+                        </span>
+                        {dados.pode_ver_equipe && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${userColor(r.usuario)}`}>{r.usuario}</span>}
+                        <span className="flex-1"/>
+                        {r.fim && <span className="font-mono text-slate-400 shrink-0">{formatarDuracao(r.segundos)}</span>}
+                        {r.meu && usaEtapas && (
+                          <select value={r.item_id || ''} onChange={e => moverPeriodo(r.id, e.target.value)} title="Mover para outra tarefa"
+                            className="w-24 shrink-0 text-[10px] bg-transparent text-slate-500 border border-slate-700/60 hover:border-slate-500 focus:border-emerald-400 rounded px-1 py-0.5 outline-none cursor-pointer">
+                            <option value="">sem etapa</option>
+                            {r.item_id && !etapas.some(e => e.id === r.item_id) && <option value={r.item_id}>Etapa removida</option>}
+                            {etapas.map(e => (
+                              <option key={e.id} value={e.id}>{e.nivel === 1 ? '   ↳ ' : ''}{e.texto}</option>
+                            ))}
+                          </select>
+                        )}
+                        {r.meu && (
+                          <button onClick={() => apagarPeriodo(r.id)} className="shrink-0 text-slate-600 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100 transition-opacity" title="Apagar período">
+                            <Trash2 size={12}/>
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {porPessoa.length > 0 && (
         <div className="space-y-1.5">
           <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por pessoa</div>
@@ -167,57 +259,6 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
               <span className="w-16 shrink-0 text-right text-slate-300 font-mono">{formatarDuracao(p.segundos)}</span>
             </div>
           ))}
-        </div>
-      )}
-
-      {etapasComTempo.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Por etapa</div>
-          {etapasComTempo.map(([id, seg]) => (
-            <div key={id} className="flex items-center justify-between gap-2 text-xs">
-              <span className="text-slate-300 truncate">{textoDaEtapa(id)}</span>
-              <span className="text-slate-400 font-mono shrink-0">{formatarDuracao(seg)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {registros.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-            {dados.pode_ver_equipe ? 'Registros' : 'Seus registros'}
-          </div>
-          {registrosVisiveis.map(r => (
-            <div key={r.id} className="flex items-center gap-2 text-xs py-1 group">
-              <span className="text-slate-500 font-mono shrink-0">{formatarInicio(r.inicio)}</span>
-              {dados.pode_ver_equipe && <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${userColor(r.usuario)}`}>{r.usuario}</span>}
-              {r.meu && mostrarEtapas && etapas.length > 0 ? (
-                <select value={r.item_id || ''} onChange={e => vincularEtapa(r.id, e.target.value)} title="Vincular a uma etapa"
-                  className={`flex-1 min-w-0 truncate bg-transparent border border-transparent hover:border-slate-700 focus:border-emerald-400 rounded px-1 py-0.5 outline-none cursor-pointer ${r.item_id ? 'text-slate-300' : 'text-slate-600 italic'}`}>
-                  <option value="">sem etapa</option>
-                  {r.item_id && !etapas.some(e => e.id === r.item_id) && <option value={r.item_id}>Etapa removida</option>}
-                  {etapas.map(e => (
-                    <option key={e.id} value={e.id}>{e.nivel === 1 ? '   ↳ ' : ''}{e.texto}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-slate-400 truncate flex-1">{mostrarEtapas && r.item_id ? textoDaEtapa(r.item_id) : ''}</span>
-              )}
-              <span className="font-mono text-slate-300 shrink-0">
-                {r.fim ? formatarDuracao(r.segundos) : <span className="text-emerald-300">em andamento</span>}
-              </span>
-              {r.meu && (
-                <button onClick={() => apagarRegistro(r.id)} className="shrink-0 text-slate-600 hover:text-red-400 md:opacity-0 md:group-hover:opacity-100 transition-opacity" title="Apagar registro">
-                  <Trash2 size={12}/>
-                </button>
-              )}
-            </div>
-          ))}
-          {registros.length > REGISTROS_VISIVEIS && (
-            <button onClick={() => setVerTodos(v => !v)} className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300">
-              {verTodos ? 'Mostrar menos' : `Ver todos (${registros.length})`}
-            </button>
-          )}
         </div>
       )}
     </div>

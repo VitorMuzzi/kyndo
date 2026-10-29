@@ -10,6 +10,7 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     nome: str
     senha: str
+    email: Optional[str] = None
     role: str = "user"  # vestigial — kept only for request-shape backward compatibility, ignored by permission logic
 
 

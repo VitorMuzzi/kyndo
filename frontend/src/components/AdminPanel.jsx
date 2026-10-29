@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { User, Users, Trash2, ScrollText, Shield, Lock, KeyRound, MoreHorizontal, ChevronDown, Pencil } from 'lucide-react';
+import { User, Users, Trash2, ScrollText, Shield, Lock, KeyRound, MoreHorizontal, ChevronDown, Pencil, Mail, UserCircle } from 'lucide-react';
 import { API, authFetch } from '../api.js';
 import { hasPermission } from '../constants.jsx';
 import AuditLogPanel from './AuditLogPanel.jsx';
 import RolesPanel from './RolesPanel.jsx';
+import MinhaConta from './MinhaConta.jsx';
+import ConfigEmails from './ConfigEmails.jsx';
+
+// Painel de edição que abre embaixo do usuário, por tipo.
+const EDICOES = {
+  nome: { rotulo: 'Novo nome', botao: 'Salvar nome',
+    ajuda: 'O nome muda em todo o histórico (cards, comentários, tempo, auditoria) e passa a ser o usuário do login.' },
+  senha: { rotulo: 'Senha temporária', botao: 'Definir senha',
+    ajuda: 'A pessoa entra com esta senha e é obrigada a criar uma nova. As sessões abertas dela são encerradas.' },
+  email: { rotulo: 'E-mail', botao: 'Salvar e-mail',
+    ajuda: 'Os dois endereços (antigo e novo) recebem um aviso da troca. Deixe em branco para tirar o e-mail.' },
+};
 
 // Campo de seleção dos cargos de um usuário: mostra os que ele tem e, ao
 // abrir, todos os cargos com caixinha. Cada clique já salva (o servidor
@@ -95,7 +107,7 @@ function MenuAcoes({ itens }) {
   );
 }
 
-export default function AdminPanel({ user, onBack, currentUsers, refreshUsers }) {
+export default function AdminPanel({ user, currentUsers, refreshUsers }) {
   const canManageUsers = hasPermission(user, 'gerenciar_usuarios');
   const canDeleteUsers = hasPermission(user, 'excluir_usuarios');
   const canManageRoles = hasPermission(user, 'gerenciar_cargos');
@@ -104,6 +116,7 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   // Seeing the user list only makes sense if you can act on it somehow —
   // create/delete/rename a user, reset a password, or assign cargos.
   const canSeeUsersTab = canManageUsers || canDeleteUsers || canManageRoles || canChangePasswords;
+  const canConfigEmails = hasPermission(user, 'configurar_emails');
   // Quem gerencia cargos não mexe no próprio acesso e só repassa o que tem
   // (o servidor confere). O Superadmin fica de fora dessas travas.
   const eu = currentUsers.find(u => u.id === user.id);
@@ -112,8 +125,10 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   const possoRepassar = (role) => souSuperadmin
     || Object.entries(role.permissoes || {}).every(([k, v]) => !v || hasPermission(user, k));
 
-  const [aba, setAba] = useState(() => (canSeeUsersTab ? 'usuarios' : canViewAuditLog ? 'log' : null));
+  // "Minha conta" é de todo mundo; o resto depende das permissões.
+  const [aba, setAba] = useState(() => (canSeeUsersTab ? 'usuarios' : 'conta'));
   const [novoNome, setNovoNome] = useState('');
+  const [novoEmail, setNovoEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [msg, setMsg] = useState('');
   const [rolesDisponiveis, setRolesDisponiveis] = useState([]);
@@ -145,14 +160,17 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
     setErroEdicao('');
     setSenhaDefinida(null);
     setEditando({ id: u.id, tipo });
-    setValorEdicao(tipo === 'nome' ? u.nome : gerarSenha());
+    setValorEdicao(tipo === 'nome' ? u.nome : tipo === 'email' ? (u.email || '') : gerarSenha());
   };
 
   const salvarEdicao = async (u) => {
     setErroEdicao('');
-    const res = editando.tipo === 'nome'
-      ? await authFetch(`${API}/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ nome: valorEdicao }) })
-      : await authFetch(`${API}/users/${u.id}/password`, { method: 'PUT', body: JSON.stringify({ nova_senha: valorEdicao }) });
+    const [url, corpo] = {
+      nome: [`${API}/users/${u.id}`, { nome: valorEdicao }],
+      email: [`${API}/users/${u.id}/email`, { email: valorEdicao }],
+      senha: [`${API}/users/${u.id}/password`, { nova_senha: valorEdicao }],
+    }[editando.tipo];
+    const res = await authFetch(url, { method: 'PUT', body: JSON.stringify(corpo) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { setErroEdicao(data.detail || 'Não foi possível salvar.'); return; }
     if (editando.tipo === 'senha') { setSenhaDefinida({ nome: u.nome, senha: valorEdicao }); carregarPedidos(); }
@@ -169,10 +187,10 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
     e.preventDefault();
     const res = await authFetch(`${API}/users`, {
       method: 'POST',
-      body: JSON.stringify({ nome: novoNome, senha: novaSenha }),
+      body: JSON.stringify({ nome: novoNome, senha: novaSenha, email: novoEmail }),
     });
     if (res.ok) {
-      setNovoNome(''); setNovaSenha(''); setMsg('Usuário criado com sucesso!');
+      setNovoNome(''); setNovaSenha(''); setNovoEmail(''); setMsg('Usuário criado com sucesso!');
       refreshUsers();
       setTimeout(() => setMsg(''), 3000);
     } else {
@@ -192,17 +210,12 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-8">
+    <div className="h-full overflow-y-auto custom-scrollbar p-3 md:p-6">
       <div className="max-w-4xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-xl flex flex-col">
-        <div className="bg-gradient-to-r from-emerald-700 to-teal-700 rounded-t-2xl p-6 flex justify-between items-center text-white">
-          <div>
-            <h2 className="text-2xl font-black italic tracking-tighter uppercase">Configurações</h2>
-            <p className="text-emerald-200 text-sm">Usuários, cargos e auditoria</p>
-          </div>
-          <button onClick={onBack} className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-xl font-bold transition-colors">Voltar ao Quadro</button>
-        </div>
-
-        <div className="flex gap-2 px-8 pt-6">
+        <div className="flex flex-wrap gap-2 px-4 md:px-8 pt-6">
+          <button onClick={() => setAba('conta')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${aba === 'conta' ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+            <UserCircle size={16}/> Minha conta
+          </button>
           {canSeeUsersTab && (
             <button onClick={() => setAba('usuarios')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${aba === 'usuarios' ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
               <Users size={16}/> Usuários
@@ -218,9 +231,22 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
               <ScrollText size={16}/> Log de Auditoria
             </button>
           )}
+          {canConfigEmails && (
+            <button onClick={() => setAba('emails')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${aba === 'emails' ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+              <Mail size={16}/> E-mails
+            </button>
+          )}
         </div>
 
-        {aba === 'log' && canViewAuditLog ? (
+        {aba === 'conta' ? (
+          <div className="p-8">
+            <MinhaConta user={user}/>
+          </div>
+        ) : aba === 'emails' && canConfigEmails ? (
+          <div className="p-8">
+            <ConfigEmails/>
+          </div>
+        ) : aba === 'log' && canViewAuditLog ? (
           <div className="p-8">
             <AuditLogPanel/>
           </div>
@@ -274,6 +300,10 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                   <input type="text" value={novoNome} onChange={e => setNovoNome(e.target.value)} className="w-full p-2 bg-slate-900 text-slate-100 border border-slate-700 rounded-lg outline-none focus:border-emerald-500" required />
                 </div>
                 <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">E-mail <span className="normal-case font-normal text-slate-500">(opcional)</span></label>
+                  <input type="email" value={novoEmail} onChange={e => setNovoEmail(e.target.value)} placeholder="pessoa@empresa.com.br" className="w-full p-2 bg-slate-900 text-slate-100 border border-slate-700 rounded-lg outline-none focus:border-emerald-500" />
+                </div>
+                <div>
                   <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Senha Temporária</label>
                   <input type="text" value={novaSenha} onChange={e => setNovaSenha(e.target.value)} className="w-full p-2 bg-slate-900 text-slate-100 border border-slate-700 rounded-lg outline-none focus:border-emerald-500" required />
                 </div>
@@ -293,8 +323,10 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                 const podeRenomear = canManageUsers && u.nome !== 'admin' && (!isProtected || souSuperadmin);
                 const podeTrocarSenha = canChangePasswords && u.id !== user.id && (!isProtected || souSuperadmin);
                 const aberto = editando?.id === u.id ? editando.tipo : null;
+                // O próprio e-mail se troca em "Minha conta" (lá pede a senha atual).
                 const acoes = [
                   podeTrocarSenha && { rotulo: 'Definir senha', icone: KeyRound, acao: () => abrirEdicao(u, 'senha') },
+                  podeTrocarSenha && { rotulo: 'E-mail', icone: Mail, acao: () => abrirEdicao(u, 'email') },
                   podeRenomear && { rotulo: 'Renomear', icone: Pencil, acao: () => abrirEdicao(u, 'nome') },
                   canDeleteUsers && !isProtected && u.id !== user.id && { rotulo: 'Excluir', icone: Trash2, perigo: true, acao: () => deletarUsuario(u.id) },
                 ].filter(Boolean);
@@ -303,6 +335,7 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                     <div className="flex items-center gap-2">
                       <div className="flex-1 min-w-0">
                         <p className="font-bold text-slate-100 truncate">{u.nome}</p>
+                        {u.email && <p className="text-[11px] text-slate-500 truncate">{u.email}</p>}
                         {!canManageRoles && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {(u.roles || []).length === 0 && <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-slate-700 text-slate-300">Sem cargo</span>}
@@ -320,9 +353,7 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                     </div>
                     {aberto && (
                       <div className="mt-3 pt-3 border-t border-slate-700 space-y-2">
-                        <label className="block text-xs font-bold text-slate-400 uppercase">
-                          {aberto === 'nome' ? 'Novo nome' : 'Senha temporária'}
-                        </label>
+                        <label className="block text-xs font-bold text-slate-400 uppercase">{EDICOES[aberto].rotulo}</label>
                         <div className="flex gap-2">
                           <input type="text" autoFocus value={valorEdicao} onChange={e => setValorEdicao(e.target.value)}
                             onKeyDown={e => { if (e.key === 'Enter') salvarEdicao(u); }}
@@ -331,15 +362,11 @@ export default function AdminPanel({ user, onBack, currentUsers, refreshUsers })
                             <button onClick={() => setValorEdicao(gerarSenha())} className="px-2 text-xs font-bold text-slate-400 hover:text-slate-200" title="Gerar outra">Gerar</button>
                           )}
                         </div>
-                        <p className="text-xs text-slate-500">
-                          {aberto === 'nome'
-                            ? 'O nome muda em todo o histórico (cards, comentários, tempo, auditoria) e passa a ser o usuário do login.'
-                            : 'A pessoa entra com esta senha e é obrigada a criar uma nova. As sessões abertas dela são encerradas.'}
-                        </p>
+                        <p className="text-xs text-slate-500">{EDICOES[aberto].ajuda}</p>
                         {erroEdicao && <p className="text-xs font-bold text-red-400">{erroEdicao}</p>}
                         <div className="flex items-center gap-3">
                           <button onClick={() => salvarEdicao(u)} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold">
-                            {aberto === 'nome' ? 'Salvar nome' : 'Definir senha'}
+                            {EDICOES[aberto].botao}
                           </button>
                           <button onClick={() => setEditando(null)} className="text-xs font-bold text-slate-400 hover:text-slate-200">Cancelar</button>
                         </div>

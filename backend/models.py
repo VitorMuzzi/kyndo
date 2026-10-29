@@ -11,6 +11,8 @@ class UserDB(Base):
     role = Column(String)
     senha_temporaria = Column(Boolean, default=False)
     senha_versao = Column(Integer, default=0)  # sobe a cada troca de senha; token com versão diferente é recusado
+    email = Column(String, nullable=True, index=True)  # minúsculo; único (conferido em routers/emails.py)
+    email_prefs = Column(JSON, nullable=True)  # {tipo de aviso: bool}; ausente = ligado — ver notificacoes.py
 
 
 class ColumnDB(Base):
@@ -151,11 +153,13 @@ class AttachmentDB(Base):
 
 
 class TimeEntryDB(Base):
-    """Um intervalo de trabalho cronometrado num card. fim nulo = cronômetro
+    """Um intervalo de trabalho cronometrado num card — ou numa atividade fora
+    de card (atividade_id preenchido, card_id nulo). fim nulo = cronômetro
     rodando; cada pessoa tem no máximo um rodando por vez."""
     __tablename__ = "time_entries"
     id = Column(String, primary_key=True, index=True)
     card_id = Column(String, index=True)
+    atividade_id = Column(String, nullable=True, index=True)
     item_id = Column(String, nullable=True)  # etapa/sub-etapa do checklist, opcional
     user_id = Column(String, index=True)
     usuario = Column(String)  # nome na hora do registro, pra exibir sem join
@@ -203,3 +207,127 @@ class PedidoSenhaDB(Base):
     id = Column(String, primary_key=True, index=True)
     user_id = Column(String, index=True)
     criado_em = Column(String)
+
+
+class TokenSenhaDB(Base):
+    """Link de "esqueci a senha" enviado por e-mail. Guarda só o hash do
+    token (quem lê o banco não consegue usar o link); vale 1 hora e uma vez."""
+    __tablename__ = "tokens_senha"
+    id = Column(String, primary_key=True, index=True)  # sha256 do token
+    user_id = Column(String, index=True)
+    criado_em = Column(String)
+    expira_em = Column(String)
+
+
+class ConfigDB(Base):
+    """Configurações gerais do sistema que se mudam pela tela (chave → JSON)."""
+    __tablename__ = "config"
+    chave = Column(String, primary_key=True)
+    valor = Column(JSON)
+
+
+class CardSeguidorDB(Base):
+    """Quem segue um card (botão "Seguir") — recebe os avisos dele no alcance "seguidos"."""
+    __tablename__ = "card_seguidores"
+    card_id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, primary_key=True, index=True)
+
+
+class FilaAvisoDB(Base):
+    """Avisos de quem escolheu receber tudo num resumo diário — saem às 18h."""
+    __tablename__ = "fila_avisos"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True)
+    card_id = Column(String, nullable=True)
+    card_titulo = Column(String, default="")
+    texto = Column(String)
+    criado_em = Column(String)
+
+
+class RelatorioDB(Base):
+    """Relatório do dia que a pessoa escreve na tela de Relatórios — um por dia."""
+    __tablename__ = "relatorios"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True)
+    data = Column(String, index=True)  # AAAA-MM-DD
+    conteudo = Column(String, default="")
+    criado_em = Column(String)
+    atualizado_em = Column(String)
+
+
+class RelatorioEnvioDB(Base):
+    """Um relatório mandado a um gestor. Guarda o texto como foi enviado:
+    editar o relatório depois não muda o que o gestor recebeu."""
+    __tablename__ = "relatorio_envios"
+    id = Column(String, primary_key=True)
+    data = Column(String, index=True)  # dia do relatório, AAAA-MM-DD
+    de_user_id = Column(String, index=True)
+    de_nome = Column(String)
+    para_user_id = Column(String, index=True)
+    para_nome = Column(String)
+    conteudo = Column(String)
+    enviado_em = Column(String)
+    origem = Column(String, default="manual")  # manual | agendado | automatico
+    lido_em = Column(String, nullable=True)    # quando o gestor abriu no Kyndo
+
+
+class RelatorioModeloDB(Base):
+    """Modelo de relatório salvo por uma pessoa, para começar o texto do dia."""
+    __tablename__ = "relatorio_modelos"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True)
+    nome = Column(String)
+    conteudo = Column(String, default="")
+    criado_em = Column(String)
+    atualizado_em = Column(String)
+
+
+class AtividadeDB(Base):
+    """Atividade fora de card (saída de campo, reunião...). Pode estar agendada
+    (agendada_inicio/fim, aparece no Cronograma antes de acontecer) e ter
+    tempo registrado em TimeEntryDB.atividade_id."""
+    __tablename__ = "atividades"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True)
+    titulo = Column(String)
+    agendada_inicio = Column(String, nullable=True)
+    agendada_fim = Column(String, nullable=True)
+    criado_em = Column(String)
+
+
+class RelatorioMensagemDB(Base):
+    """Mensagem da conversa sobre um relatório (pessoa + dia) com um gestor."""
+    __tablename__ = "relatorio_mensagens"
+    id = Column(String, primary_key=True)
+    autor_id = Column(String, index=True)   # quem escreveu o relatório
+    data = Column(String, index=True)
+    gestor_id = Column(String, index=True)
+    de_user_id = Column(String)             # quem escreveu esta mensagem
+    texto = Column(String)
+    criado_em = Column(String)
+    lida_em = Column(String, nullable=True)
+
+
+class RelatorioAgendamentoDB(Base):
+    """Envio de um relatório marcado para uma data e hora. status "vazio" =
+    chegou a hora e não havia texto: fica na tela até a pessoa resolver."""
+    __tablename__ = "relatorio_agendamentos"
+    id = Column(String, primary_key=True)
+    user_id = Column(String, index=True)
+    data = Column(String)
+    para = Column(JSON, default=list)
+    enviar_em = Column(String, index=True)
+    status = Column(String, default="pendente")
+    criado_em = Column(String)
+
+
+class RelatorioAutomaticoDB(Base):
+    """Envio automático do relatório do dia, nos dias da semana e hora escolhidos."""
+    __tablename__ = "relatorio_automatico"
+    user_id = Column(String, primary_key=True)
+    ativo = Column(Boolean, default=False)
+    dias = Column(JSON, default=list)       # 0 = segunda ... 6 = domingo
+    hora = Column(String, default="18:00")
+    para = Column(JSON, default=list)
+    sem_texto = Column(String, default="nada")  # nada | resumo
+    ultimo_envio = Column(String, nullable=True)

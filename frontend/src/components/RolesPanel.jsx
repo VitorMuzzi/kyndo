@@ -4,7 +4,7 @@ import { API, authFetch } from '../api.js';
 import { hasPermission } from '../constants.jsx';
 
 const GRUPOS = [
-  { titulo: 'Usuários', chaves: ['gerenciar_usuarios', 'excluir_usuarios', 'trocar_senha_outros', 'gerenciar_cargos', 'ver_log_auditoria', 'restaurar_alteracoes'] },
+  { titulo: 'Usuários', chaves: ['gerenciar_usuarios', 'excluir_usuarios', 'trocar_senha_outros', 'gerenciar_cargos', 'ver_log_auditoria', 'restaurar_alteracoes', 'configurar_emails'] },
   { titulo: 'Quadro', chaves: ['gerenciar_colunas', 'reordenar_cards', 'criar_card_coluna_privada'] },
   { titulo: 'Cards', chaves: ['editar_card', 'excluir_card', 'editar_prioridade', 'editar_prazo', 'ver_etapas', 'gerenciar_etapas', 'concluir_etapas', 'gerenciar_responsaveis'] },
   { titulo: 'Sugestões', chaves: ['decidir_sugestoes'] },

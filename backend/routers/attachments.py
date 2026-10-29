@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from attachment_storage import MAX_UPLOAD_BYTES, UPLOAD_DIR
 from audit import _mk_log
 from database import get_db
+import notificacoes
 from lixeira import excluir_linha
 from models import AttachmentDB, CardDB, UserDB
 from rbac import get_user_permissions, get_visible_column_ids
@@ -86,6 +87,7 @@ async def upload_attachment(card_id: str, file: UploadFile = File(...), db: Sess
             reversao={"anexo_id": nova.id})
     db.commit()
     db.refresh(nova)
+    notificacoes.anexo_adicionado(db, db_card, current_user, nova.nome_original)
     return _serialize(nova)
 
 

@@ -85,6 +85,11 @@ def _run_schema_migrations():
         "ALTER TABLE audit_log ADD COLUMN lixeira_id VARCHAR",
         "ALTER TABLE audit_log ADD COLUMN revertido_em VARCHAR",
         "ALTER TABLE audit_log ADD COLUMN revertido_por VARCHAR",
+        "ALTER TABLE users ADD COLUMN email VARCHAR",
+        "ALTER TABLE users ADD COLUMN email_prefs TEXT",
+        "ALTER TABLE time_entries ADD COLUMN atividade_id VARCHAR",
+        "ALTER TABLE relatorio_envios ADD COLUMN origem VARCHAR DEFAULT 'manual'",
+        "ALTER TABLE relatorio_envios ADD COLUMN lido_em VARCHAR",
     ]:
         with engine.connect() as conn:
             try:

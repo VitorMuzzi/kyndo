@@ -137,8 +137,8 @@ function TrabalhandoAgora({ lista, recebido, onAbrirCard, onVerFuncionario }) {
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"/>
           </span>
           <button onClick={() => onVerFuncionario(r.user_id)} className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 hover:ring-1 hover:ring-white/40 ${userColor(r.usuario)}`}>{r.usuario}</button>
-          <button onClick={() => onAbrirCard(r.card_id)} className="flex-1 min-w-0 text-left">
-            <div className="text-sm text-slate-200 font-bold truncate hover:text-emerald-300">{r.card_titulo}</div>
+          <button onClick={() => r.card_id && onAbrirCard(r.card_id)} className="flex-1 min-w-0 text-left">
+            <div className="text-sm text-slate-200 font-bold truncate hover:text-emerald-300">{!r.card_id && <span className="mr-1.5 px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 text-[9px] font-black uppercase">atividade</span>}{r.card_titulo}</div>
             {r.etapa_texto && <div className="text-[11px] text-slate-500 truncate">em {r.etapa_texto}</div>}
           </button>
           <span className="font-mono text-sm font-bold text-emerald-300 tabular-nums shrink-0">
@@ -227,7 +227,12 @@ function VisaoEquipe({ dados, onAbrirCard, onVerFuncionario }) {
 function FichaFuncionario({ ficha, onVoltar, onAbrirCard }) {
   const [verTodos, setVerTodos] = useState(false);
   const maxDia = Math.max(1, ...ficha.por_dia.map(d => d.segundos));
-  const maxCard = Math.max(1, ...ficha.por_card.map(c => c.segundos));
+  // Atividades fora de card (saída de campo...) entram na mesma lista, em roxo.
+  const porItem = [
+    ...ficha.por_card.map(c => ({ ...c, chave: c.card_id })),
+    ...(ficha.por_atividade || []).map(a => ({ ...a, chave: a.atividade_id, atividade: true })),
+  ];
+  const maxCard = Math.max(1, ...porItem.map(c => c.segundos));
   const diasComTempo = ficha.por_dia.filter(d => d.segundos > 0).length;
   const atrasados = ficha.cards_responsavel.filter(c => c.atrasado).length;
   const registros = verTodos ? ficha.registros : ficha.registros.slice(0, 10);
@@ -241,7 +246,7 @@ function FichaFuncionario({ ficha, onVoltar, onAbrirCard }) {
         </button>
         <span className={`text-sm font-black px-3 py-1 rounded-full ${userColor(ficha.usuario.nome)}`}>{ficha.usuario.nome}</span>
         {ficha.rodando ? (
-          <button onClick={() => onAbrirCard(ficha.rodando.card_id)} className="text-xs text-emerald-300 hover:underline truncate">
+          <button onClick={() => ficha.rodando.card_id && onAbrirCard(ficha.rodando.card_id)} className="text-xs text-emerald-300 hover:underline truncate">
             ● trabalhando agora em "{ficha.rodando.card_titulo}"{ficha.rodando.etapa_texto ? ` — ${ficha.rodando.etapa_texto}` : ''}
           </button>
         ) : <span className="text-xs text-slate-500">sem cronômetro ligado</span>}
@@ -275,13 +280,15 @@ function FichaFuncionario({ ficha, onVoltar, onAbrirCard }) {
       </Bloco>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Bloco titulo="Horas por card" icone={<Briefcase size={14} className="text-teal-400"/>}>
-          {ficha.por_card.length === 0 ? <p className="text-xs text-slate-500">Nenhuma hora registrada no período.</p> : (
+        <Bloco titulo="Horas por card e atividade" icone={<Briefcase size={14} className="text-teal-400"/>}>
+          {porItem.length === 0 ? <p className="text-xs text-slate-500">Nenhuma hora registrada no período.</p> : (
             <div className="space-y-1">
-              {ficha.por_card.map(c => (
-                <button key={c.card_id} onClick={() => onAbrirCard(c.card_id)} className="w-full flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-colors text-left">
-                  <span className="w-40 shrink-0 text-xs font-bold text-slate-300 truncate">{c.titulo}</span>
-                  <Barra pct={Math.max(4, (c.segundos / maxCard) * 100)} cor="#14b8a6"/>
+              {porItem.map(c => (
+                <button key={c.chave} onClick={() => !c.atividade && onAbrirCard(c.card_id)}
+                  className={`w-full flex items-center gap-3 px-2 py-1.5 rounded-lg transition-colors text-left ${c.atividade ? 'cursor-default' : 'hover:bg-slate-800'}`}
+                  title={c.atividade ? 'Atividade fora de card' : undefined}>
+                  <span className={`w-40 shrink-0 text-xs font-bold truncate ${c.atividade ? 'text-violet-300' : 'text-slate-300'}`}>{c.titulo}</span>
+                  <Barra pct={Math.max(4, (c.segundos / maxCard) * 100)} cor={c.atividade ? '#8b5cf6' : '#14b8a6'}/>
                   <span className="w-20 shrink-0 text-right text-xs font-mono font-bold text-slate-200">{formatarDuracao(c.segundos)}</span>
                 </button>
               ))}
@@ -295,8 +302,8 @@ function FichaFuncionario({ ficha, onVoltar, onAbrirCard }) {
               {registros.map(r => (
                 <div key={r.id} className="flex items-center gap-2 text-xs py-1">
                   <span className="text-slate-500 font-mono shrink-0">{formatarHorario(r.inicio)}</span>
-                  <button onClick={() => onAbrirCard(r.card_id)} className="flex-1 min-w-0 text-left truncate text-slate-300 hover:text-emerald-300">
-                    {r.card_titulo}{r.etapa_texto && <span className="text-slate-500"> · {r.etapa_texto}</span>}
+                  <button onClick={() => r.card_id && onAbrirCard(r.card_id)} className="flex-1 min-w-0 text-left truncate text-slate-300 hover:text-emerald-300">
+                    {!r.card_id && <span className="mr-1.5 px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 text-[9px] font-black uppercase">atividade</span>}{r.card_titulo}{r.etapa_texto && <span className="text-slate-500"> · {r.etapa_texto}</span>}
                   </button>
                   <span className="font-mono text-slate-300 shrink-0">{r.fim ? formatarDuracao(r.segundos) : <span className="text-emerald-300">em andamento</span>}</span>
                 </div>

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from audit import _mk_log
 from database import get_db
 from lixeira import excluir_linha
-from models import CardDB, TimeEntryDB, UserDB
+from models import AtividadeDB, CardDB, TimeEntryDB, UserDB
 from rbac import get_user_permissions, get_visible_column_ids
 from security import get_current_user
 
@@ -65,6 +65,13 @@ def _parar(entry: TimeEntryDB, agora: datetime):
 def _serializar_atual(db, entry: TimeEntryDB, agora: datetime):
     if entry is None:
         return None
+    if entry.atividade_id:
+        atv = db.query(AtividadeDB).filter(AtividadeDB.id == entry.atividade_id).first()
+        return {
+            "id": entry.id, "card_id": None, "card_titulo": "", "item_id": None, "etapa_texto": None,
+            "atividade_id": entry.atividade_id, "atividade_titulo": atv.titulo if atv else "Atividade",
+            "inicio": entry.inicio, "decorrido_segundos": _segundos(entry, agora),
+        }
     card = db.query(CardDB).filter(CardDB.id == entry.card_id).first()
     etapa = _etapas_por_id(card.checklist if card else None).get(entry.item_id) if entry.item_id else None
     return {
@@ -168,6 +175,8 @@ def vincular_etapa(entry_id: str, body: IniciarTempo, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Registro não encontrado")
     if entry.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Só dá pra alterar o próprio registro de tempo")
+    if entry.atividade_id:
+        raise HTTPException(status_code=400, detail="Registro de atividade não tem etapa")
     card = db.query(CardDB).filter(CardDB.id == entry.card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card não encontrado")
@@ -188,6 +197,12 @@ def apagar_registro(entry_id: str, db: Session = Depends(get_db), current_user: 
         raise HTTPException(status_code=404, detail="Registro não encontrado")
     if entry.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Só dá pra apagar o próprio registro de tempo")
+    if entry.atividade_id:
+        # Tempo de atividade não é histórico de card: some sem log nem lixeira,
+        # como a própria atividade.
+        db.delete(entry)
+        db.commit()
+        return {"ok": True}
     card = db.query(CardDB).filter(CardDB.id == entry.card_id).first()
     duracao = _segundos(entry, datetime.now())
     lixeira_id = excluir_linha(db, "tempo", entry, current_user.nome)

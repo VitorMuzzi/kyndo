@@ -11,6 +11,12 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_db_path}"
 os.environ["SECRET_KEY"] = "t" * 64
 # Sem isso o load_dotenv do main.py puxaria a senha real do backend/.env.
 os.environ["SUPERADMIN_PASSWORD"] = "admin"
+# Idem pro SMTP: os testes nunca mandam e-mail de verdade (test_emails.py
+# liga o envio com uma caixa falsa), e o resumo diário não roda em segundo plano.
+os.environ["SMTP_USER"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+os.environ["KYNDO_URL"] = ""
+os.environ["KYNDO_AGENDADOR"] = "0"
 os.environ["UPLOAD_DIR"] = os.path.join(tempfile.gettempdir(), f"kyndo_test_uploads_{uuid.uuid4().hex}")
 
 import pytest

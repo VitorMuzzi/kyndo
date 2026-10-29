@@ -661,7 +661,7 @@ def _desfazer_decisao(ctx):
 def _regra(funcao, *args):
     """As regras de cargo do router levantam HTTPException; aqui viram Conflito."""
     try:
-        funcao(*args)
+        return funcao(*args)
     except HTTPException as e:
         raise Conflito(e.detail)
 
@@ -711,6 +711,32 @@ def _desfazer_renomeacao(ctx):
     ctx.registrar(None, user.nome, "usuario_renomeado", alvo_tipo="usuario", alvo_id=user.id,
                   valor_antigo=r["depois"], valor_novo=r["antes"],
                   reversao={"user_id": user.id, "antes": r["depois"], "depois": r["antes"]})
+
+
+def _desfazer_email(ctx):
+    from routers.emails import trocar_email, validar_email
+    r = ctx.r
+    user = ctx.db.query(UserDB).filter(UserDB.id == r["user_id"]).first()
+    if user is None:
+        raise Conflito("Este usuário não existe mais (está na lixeira?).")
+    quem = ctx.por_quem(alvo_id=user.id, filtro=lambda l: l.acao == "email_alterado")
+    if quem or user.email != r["depois"]:
+        raise Conflito(f"O e-mail de {user.nome} foi alterado de novo depois{quem}.")
+    if is_superadmin(ctx.db, user) and not is_superadmin(ctx.db, ctx.usuario):
+        raise Conflito("Só um Superadmin pode alterar o e-mail de outro Superadmin.")
+    antes = _regra(validar_email, ctx.db, r["antes"], user.id) if r["antes"] else None
+    trocar_email(ctx.db, user, antes, ctx.usuario, detalhe=f"desfez: {ctx.log.usuario} em {_fmt(ctx.log.data)}")
+
+
+def _desfazer_config_emails(ctx):
+    import notificacoes
+    r = ctx.r
+    quem = ctx.por_quem(alvo_id=notificacoes.CHAVE_MODOS, filtro=lambda l: l.acao == "config_emails_alterada")
+    if quem or notificacoes.modos(ctx.db) != r["depois"]:
+        raise Conflito(f"A configuração dos e-mails foi alterada de novo depois{quem}.")
+    notificacoes.gravar_modos(ctx.db, r["antes"])
+    ctx.registrar(None, "E-mails automáticos", "config_emails_alterada", alvo_tipo="config",
+                  alvo_id=notificacoes.CHAVE_MODOS, reversao={"antes": r["depois"], "depois": r["antes"]})
 
 
 def _desfazer_exclusao_usuario(ctx):
@@ -885,6 +911,8 @@ TRATADORES = {
     "usuario_restaurado": _desfazer_existencia_usuario,
     "usuario_excluido": _desfazer_exclusao_usuario,
     "usuario_renomeado": _desfazer_renomeacao,
+    "email_alterado": _desfazer_email,
+    "config_emails_alterada": _desfazer_config_emails,
     "cargos_do_usuario_alterados": _desfazer_cargos_do_usuario,
     "cargo_criado": _desfazer_existencia_cargo,
     "cargo_restaurado": _desfazer_existencia_cargo,
@@ -930,12 +958,16 @@ def disponibilidade(log, agora=None, lixeira_viva=None):
 
 # Desfazer em usuário, cargo e coluna mexe em administração: além de
 # restaurar_alteracoes, exige a permissão de administrar aquilo.
-PERMISSAO_POR_ALVO = {"usuario": "gerenciar_usuarios", "cargo": "gerenciar_cargos", "coluna": "gerenciar_colunas"}
+PERMISSAO_POR_ALVO = {"usuario": "gerenciar_usuarios", "cargo": "gerenciar_cargos", "coluna": "gerenciar_colunas",
+                      "config": "configurar_emails"}
 
 
 def permissao_extra(log):
     if log.acao == "cargos_do_usuario_alterados":
         return "gerenciar_cargos"
+    if log.acao == "email_alterado":
+        # Mesma exigência de alterar o e-mail de outra pessoa.
+        return "trocar_senha_outros"
     return PERMISSAO_POR_ALVO.get(log.alvo_tipo)
 
 

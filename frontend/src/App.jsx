@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, LogOut, User, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Pin, PinOff, Settings } from 'lucide-react';
+import { Plus, MoreHorizontal, Lock, Unlock, Calendar, RefreshCw, Filter, ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, MessageSquare, Search, Menu } from 'lucide-react';
 
 import { API, authFetch } from './api.js';
-import { APP_VERSION, PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon } from './constants.jsx';
+import { APP_VERSION, PRIORIDADES_BADGE, PRIORIDADE_CARD_STYLE, PRIORIDADE_ORDEM, formatarData, hasPermission, userColor, GitHubIcon, TELAS, TELA_CONFIG } from './constants.jsx';
 
 import LoginScreen from './components/LoginScreen.jsx';
 import ChangePasswordScreen from './components/ChangePasswordScreen.jsx';
@@ -17,7 +17,11 @@ import NotasView from './components/NotasView.jsx';
 import DesenhoView from './components/DesenhoView.jsx';
 import DashboardView from './components/DashboardView.jsx';
 import GestaoView from './components/GestaoView.jsx';
+import RelatoriosView from './components/RelatoriosView.jsx';
+import Sidebar from './components/Sidebar.jsx';
 import SearchModal from './components/SearchModal.jsx';
+
+const SETA_QUADRO = 'w-10 h-10 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-xl ring-2 ring-slate-950/60 flex items-center justify-center transition-opacity duration-200';
 
 export default function App() {
   const [user, setUser]           = useState(null);
@@ -32,13 +36,21 @@ export default function App() {
   const [cronometro, setCronometro] = useState(null);  // o cronômetro em andamento de quem está logado
   const [activeMenu, setActiveMenu]     = useState(null);
   const [pedidosSenha, setPedidosSenha] = useState(0);  // "esqueci a senha" esperando quem pode atender
+  const [relatoriosNaoLidos, setRelatoriosNaoLidos] = useState(0);  // relatórios recebidos e respostas novas
+  // Link de relatório vindo de e-mail: ?relatorio_de=<pessoa>&dia=<data> (gestor) ou ?meu_relatorio=<data>.
+  const [relatorioDoLink, setRelatorioDoLink] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('relatorio_de') && q.get('dia')) return { tipo: 'recebido', autor_id: q.get('relatorio_de'), data: q.get('dia') };
+    if (q.get('meu_relatorio')) return { tipo: 'meu', data: q.get('meu_relatorio') };
+    return null;
+  });
   const [isSyncing, setIsSyncing]       = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [headerVisible, setHeaderVisible] = useState(false);
-  const [headerPinned, setHeaderPinned] = useState(() => localStorage.getItem('kyndo_header_pinned') === 'true');
-  const [headerHeight, setHeaderHeight] = useState(0);
+  const [menuRecolhido, setMenuRecolhido] = useState(() => localStorage.getItem('kyndo_menu_recolhido') === 'true');
+  const [menuAberto, setMenuAberto] = useState(false);  // gaveta do menu no celular
   const [showLeftArrow, setShowLeftArrow]   = useState(false);
   const [showRightArrow, setShowRightArrow] = useState(false);
+  const [rolagem, setRolagem] = useState({ esq: false, dir: false });  // há colunas escondidas de cada lado?
   const [activeView, setActiveView] = useState('board');
   const [colOrder, setColOrder] = useState({});   // explicit per-column card order after drag
   const [showSearch, setShowSearch] = useState(false);
@@ -118,8 +130,26 @@ export default function App() {
     return () => el.removeEventListener('wheel', handler);
   }, []);
 
+  // As setas do quadro só existem quando há colunas escondidas naquele lado.
+  // O ResizeObserver acompanha a janela, o menu recolhendo e colunas novas.
+  useEffect(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const medir = () => setRolagem({
+      esq: el.scrollLeft > 4,
+      dir: el.scrollLeft + el.clientWidth < el.scrollWidth - 4,
+    });
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    el.addEventListener('scroll', medir, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener('scroll', medir); };
+  }, [user, currentScreen]);
+
   // Restore session
   useEffect(() => {
+    // Link de "criar nova senha" do e-mail: vai pro login, que mostra o formulário.
+    if (new URLSearchParams(window.location.search).has('redefinir')) { handleLogout(); return; }
     const savedUser = sessionStorage.getItem('demandaflow_user');
     const token     = sessionStorage.getItem('demandaflow_token');
     if (savedUser && token) { setUser(JSON.parse(savedUser)); setCurrentScreen('board'); }
@@ -154,8 +184,9 @@ export default function App() {
       // ficariam congeladas na sessão até o próximo login.
       const pRes = await authFetch(`${API}/me/permissions`);
       if (pRes.ok) {
-        const { permissions, nome, pedidos_senha } = await pRes.json();
+        const { permissions, nome, pedidos_senha, relatorios_nao_lidos } = await pRes.json();
         setPedidosSenha(pedidos_senha || 0);
+        setRelatoriosNaoLidos(relatorios_nao_lidos || 0);
         setUser(u => {
           // O nome também pode mudar: alguém renomeou esta conta.
           if (!u || (JSON.stringify(u.permissions || []) === JSON.stringify(permissions) && (!nome || u.nome === nome))) return u;
@@ -169,6 +200,22 @@ export default function App() {
   };
 
   useEffect(() => { cardsRef.current = cards; }, [cards]);
+
+  // Link de card vindo de e-mail (?card=id): abre assim que os cards chegam.
+  const cardDoLink = useRef(new URLSearchParams(window.location.search).get('card'));
+  useEffect(() => {
+    const id = cardDoLink.current;
+    if (!id || Object.keys(cards).length === 0) return;
+    cardDoLink.current = null;
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+    if (cards[id]) { setActiveView('board'); setModal({ card: cards[id], status: cards[id].status }); }
+  }, [cards]);
+
+  useEffect(() => {
+    if (!relatorioDoLink || !user || currentScreen !== 'board') return;
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+    setActiveView('relatorios');
+  }, [relatorioDoLink, user, currentScreen]);
 
   useEffect(() => { if (user && currentScreen === 'board') sync(); }, [user, currentScreen]);
   useEffect(() => {
@@ -186,21 +233,7 @@ export default function App() {
   const toggleFullscreen = () =>
     document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
 
-  useEffect(() => { localStorage.setItem('kyndo_header_pinned', headerPinned ? 'true' : 'false'); }, [headerPinned]);
-
-  // Measure header height so pinned content can offset itself correctly.
-  // Callback ref (not useRef+useEffect) because the header only mounts after
-  // login, well after App's initial mount/effects have already run.
-  const headerRef = useCallback((node) => {
-    if (!node) return;
-    const update = () => setHeaderHeight(node.offsetHeight);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
-
-  const showHeader = headerVisible || headerPinned;
+  useEffect(() => { localStorage.setItem('kyndo_menu_recolhido', menuRecolhido ? 'true' : 'false'); }, [menuRecolhido]);
 
   const handleLogin = (loggedUser) => {
     sessionStorage.setItem('demandaflow_token', loggedUser.token);
@@ -411,13 +444,10 @@ export default function App() {
 
   if (!user || currentScreen === 'login') return <LoginScreen onLogin={handleLogin} />;
   if (currentScreen === 'change_password') return <ChangePasswordScreen user={user} onPasswordChanged={handlePasswordChanged} />;
-  if (currentScreen === 'admin') return <AdminPanel user={user} onBack={() => setCurrentScreen('board')} currentUsers={allUsers} refreshUsers={fetchUsers} />;
 
   const canManageColumns = hasPermission(user, 'gerenciar_colunas');
   const canReorderCards = hasPermission(user, 'reordenar_cards');
   const canCreateCardAnywhere = hasPermission(user, 'criar_card_coluna_privada');
-  const canAccessAdminPanel = ['gerenciar_usuarios', 'excluir_usuarios', 'gerenciar_cargos', 'ver_log_auditoria', 'trocar_senha_outros']
-    .some(key => hasPermission(user, key));
   const cardsArray = Object.values(cards);
 
   const openLinkedItem = (type, id) => {
@@ -426,14 +456,30 @@ export default function App() {
     setModal(null);
   };
 
+  const telas = TELAS.filter(t => !t.permissao || hasPermission(user, t.permissao));
+  const telaAtual = activeView === TELA_CONFIG.key ? TELA_CONFIG : (TELAS.find(t => t.key === activeView) || TELAS[0]);
+  const IconeTela = telaAtual.icone;
+  const selecionarTela = (key) => {
+    setActiveView(key);
+    setMenuAberto(false);
+    if (key === TELA_CONFIG.key) fetchUsers();
+  };
+  const propsMenu = {
+    telas, ativa: activeView, onSelecionar: selecionarTela, user, pedidosSenha, onSair: handleLogout,
+    pontos: { relatorios: relatoriosNaoLidos },
+    recolhido: menuRecolhido, onAlternarRecolhido: () => setMenuRecolhido(r => !r),
+  };
+
+  const rolarEsquerda = () => boardRef.current?.scrollBy({ left: -320, behavior: 'smooth' });
+  const rolarDireita = () => boardRef.current?.scrollBy({ left: 320, behavior: 'smooth' });
+
   const onNavigateToCard = (cardId) => {
     const card = cardsRef.current[cardId];
     if (card) setModal({ card, status: card.status });
   };
 
   return (
-    <div className="relative h-[100dvh] font-sans overflow-hidden"
-      onMouseMove={e => { setShowLeftArrow(e.clientX < 80); setShowRightArrow(e.clientX > window.innerWidth - 80); }}>
+    <div className="relative h-[100dvh] font-sans overflow-hidden flex">
       <div className="fixed inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 -z-10" />
       <span className="fixed bottom-1.5 right-2 z-[5] text-[11px] text-white/40 font-mono pointer-events-none select-none">{APP_VERSION}</span>
 
@@ -492,74 +538,53 @@ export default function App() {
       <CronometroFlutuante
         cronometro={cronometro}
         onAbrirCard={onNavigateToCard}
+        onAbrirAtividade={() => setActiveView('cronograma')}
         onParar={() => pararCronometro().then(() => setCronometro(null)).catch(e => alert(e.message))}
       />
 
-      {/* Header trigger zone */}
-      {!headerPinned && (
-        <div className="fixed top-0 left-0 right-0 h-4 z-[120]" onMouseEnter={() => setHeaderVisible(true)} />
-      )}
-      <header
-        ref={headerRef}
-        className={`fixed top-0 left-0 right-0 z-[110] flex flex-col sm:flex-row justify-between items-center gap-3 bg-slate-900/90 border-b border-slate-800 p-3 md:p-4 rounded-b-2xl backdrop-blur-md transition-transform duration-300 ${showHeader ? 'translate-y-0' : '-translate-y-full'}`}
-        onMouseEnter={() => setHeaderVisible(true)}
-        onMouseLeave={() => setHeaderVisible(false)}
-      >
-        <div className="w-full flex justify-between items-center sm:w-auto">
-          <h1 className="text-2xl md:text-3xl font-black text-white italic tracking-tighter uppercase">Kyndo</h1>
-          <button onClick={sync} className="sm:hidden flex items-center justify-center p-2 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 shadow-lg">
-            <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
-          </button>
+      {/* Menu lateral: fixo no computador, gaveta no celular */}
+      <aside className="hidden md:block h-full shrink-0">
+        <Sidebar {...propsMenu}/>
+      </aside>
+      {menuAberto && (
+        <div className="md:hidden fixed inset-0 z-[150] flex">
+          <div className="h-full shrink-0"><Sidebar {...propsMenu} gaveta onFecharGaveta={() => setMenuAberto(false)}/></div>
+          <div className="flex-1 bg-black/60" onClick={() => setMenuAberto(false)}/>
         </div>
+      )}
 
-        <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto justify-end relative">
-          <button onClick={() => setHeaderPinned(p => !p)} className={`hidden sm:flex items-center justify-center p-2 px-3 rounded-xl border transition-colors shadow-lg ${headerPinned ? 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-300' : 'bg-white/20 hover:bg-white/30 text-white border-white/10'}`} title={headerPinned ? 'Desafixar cabeçalho' : 'Fixar cabeçalho'}>
-            {headerPinned ? <PinOff size={18} /> : <Pin size={18} />}
-          </button>
-          <button onClick={toggleFullscreen} className="hidden sm:flex items-center justify-center p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg" title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
-          <button onClick={sync} className="hidden sm:flex items-center justify-center p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg">
-            <RefreshCw size={18} className={isSyncing ? 'animate-spin' : ''} />
-          </button>
-          <button onClick={() => setShowSearch(true)} className="hidden sm:flex items-center gap-2 p-2 px-3 bg-white/20 hover:bg-white/30 rounded-xl text-white border border-white/10 transition-colors shadow-lg" title="Buscar cards (Ctrl+K)">
-            <Search size={18} />
-            <span className="text-xs text-white/50 font-mono">Ctrl K</span>
-          </button>
+      <div className="flex-1 min-w-0 h-full flex flex-col">
+      <header className="h-14 shrink-0 flex items-center gap-2 md:gap-3 px-3 md:px-5 bg-slate-900/80 border-b border-slate-800 backdrop-blur-md relative z-[110]">
+        <button onClick={() => setMenuAberto(true)} className="md:hidden p-2 -ml-1 rounded-lg text-slate-300 hover:text-white hover:bg-white/10" title="Menu">
+          <Menu size={20} />
+        </button>
+        <h1 className="flex items-center gap-2 min-w-0 text-base md:text-lg font-black text-white tracking-tight">
+          <IconeTela size={18} className="text-emerald-400 shrink-0" />
+          <span className="truncate">{telaAtual.label}</span>
+        </h1>
+        <div className="flex-1" />
 
-          {/* View tabs */}
-          <div className="hidden sm:flex items-center bg-white/10 rounded-xl border border-white/10 p-0.5 shadow-lg">
-            {[
-              { key: 'board',      label: 'Quadro' },
-              { key: 'cronograma', label: 'Cronograma' },
-              { key: 'notas',      label: 'Notas' },
-              { key: 'desenho',    label: 'Desenho' },
-              { key: 'dashboard',  label: 'Dashboard' },
-              ...(hasPermission(user, 'acessar_gestao') ? [{ key: 'gestao', label: 'Gestão' }] : []),
-            ].map(v => (
-              <button key={v.key} onClick={() => setActiveView(v.key)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeView === v.key ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow' : 'text-white hover:bg-white/10'}`}>
-                {v.label}
-              </button>
-            ))}
-          </div>
+        <button onClick={() => setShowSearch(true)} className="flex items-center gap-2 p-2 md:px-3 bg-white/10 hover:bg-white/20 rounded-xl text-white border border-white/10 transition-colors" title="Buscar cards (Ctrl+K)">
+          <Search size={16} />
+          <span className="hidden lg:inline text-xs text-white/50 font-mono">Ctrl K</span>
+        </button>
 
-          {/* Filter dropdown */}
-          <div className="relative flex-grow sm:flex-none">
-            <div onClick={() => setFiltroAberto(!filtroAberto)} className="flex items-center justify-between gap-2 bg-slate-800/90 p-2 md:px-4 rounded-xl text-slate-100 shadow-lg border border-slate-700 cursor-pointer h-full transition-colors hover:bg-slate-800">
-              <div className="flex items-center gap-2">
-                <Filter size={16} className="text-emerald-400 shrink-0" />
-                <span className="font-bold text-xs md:text-sm truncate">
-                  {filtroAtivo === 'todas' ? 'Todas Demandas' : filtroAtivo === 'minhas' ? 'Minhas Demandas' : `Prio: ${filtroAtivo}`}
-                  {ordenacao !== 'prioridade_desc' && <span className="ml-1 text-emerald-400">{ordenacao === 'prioridade_asc' ? '↑' : '–'}</span>}
-                </span>
-              </div>
+        {/* Filter dropdown — só o Quadro usa */}
+        {activeView === 'board' && (
+          <div className="relative">
+            <div onClick={() => setFiltroAberto(!filtroAberto)} className="flex items-center gap-2 bg-slate-800/90 p-2 md:px-3 rounded-xl text-slate-100 border border-slate-700 cursor-pointer transition-colors hover:bg-slate-800" title="Filtrar e ordenar">
+              <Filter size={16} className="text-emerald-400 shrink-0" />
+              <span className="hidden sm:inline font-bold text-xs md:text-sm truncate">
+                {filtroAtivo === 'todas' ? 'Todas Demandas' : filtroAtivo === 'minhas' ? 'Minhas Demandas' : `Prio: ${filtroAtivo}`}
+                {ordenacao !== 'prioridade_desc' && <span className="ml-1 text-emerald-400">{ordenacao === 'prioridade_asc' ? '↑' : '–'}</span>}
+              </span>
+              {filtroAtivo !== 'todas' && <span className="sm:hidden w-2 h-2 rounded-full bg-emerald-400" />}
               <ChevronDown size={14} className="text-slate-400 shrink-0" />
             </div>
             {filtroAberto && (
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setFiltroAberto(false)} />
-                <div className="absolute top-full mt-2 right-0 sm:right-auto w-full min-w-[180px] bg-slate-800 rounded-xl shadow-2xl border border-slate-700 z-50 overflow-hidden">
+                <div className="absolute top-full mt-2 right-0 min-w-[220px] bg-slate-800 rounded-xl shadow-2xl border border-slate-700 z-50 overflow-hidden">
                   <div className="px-3 pt-2 pb-1 text-[10px] font-black text-slate-500 uppercase tracking-widest">Filtrar</div>
                   {[
                     { val: 'todas',  label: 'Todas as Demandas' },
@@ -587,65 +612,74 @@ export default function App() {
               </>
             )}
           </div>
+        )}
 
-          {/* User info */}
-          <div className="flex items-center gap-2 md:gap-4 bg-white/20 p-2 md:px-4 rounded-xl text-white border border-white/10">
-            <div className="flex items-center gap-1 md:gap-2">
-              <User size={16} />
-              <span className="font-bold text-xs md:text-sm truncate max-w-[80px] md:max-w-none">{user.nome}</span>
-            </div>
-            {canAccessAdminPanel && (
-              <button onClick={() => { setCurrentScreen('admin'); fetchUsers(); }}
-                className="relative p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
-                title={pedidosSenha > 0 ? `Configurações — ${pedidosSenha} pedido(s) de nova senha` : 'Configurações'}>
-                <Settings size={18} />
-                {pedidosSenha > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-slate-800" />}
-              </button>
-            )}
-            <button onClick={handleLogout} className="text-red-300 hover:text-red-100 p-1 ml-1 md:ml-2 transition-colors border-l border-white/20 pl-2 md:pl-4" title="Sair">
-              <LogOut size={16} />
-            </button>
-          </div>
-        </div>
+        <button onClick={sync} className="flex items-center justify-center p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white border border-white/10 transition-colors" title="Atualizar">
+          <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
+        </button>
+        <button onClick={toggleFullscreen} className="hidden md:flex items-center justify-center p-2 bg-white/10 hover:bg-white/20 rounded-xl text-white border border-white/10 transition-colors" title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}>
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        </button>
       </header>
 
-      {/* Scroll arrows */}
-      <button onClick={() => boardRef.current && (boardRef.current.scrollLeft -= 320)}
-        className={`fixed left-2 top-1/2 -translate-y-1/2 z-[100] w-10 h-16 bg-black/40 text-white rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm pointer-events-auto ${showLeftArrow && activeView === 'board' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <ChevronLeft size={28} />
-      </button>
-      <button onClick={() => boardRef.current && (boardRef.current.scrollLeft += 320)}
-        className={`fixed right-2 top-1/2 -translate-y-1/2 z-[100] w-10 h-16 bg-black/40 text-white rounded-xl flex items-center justify-center transition-all duration-200 backdrop-blur-sm ${showRightArrow && activeView === 'board' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <ChevronRight size={28} />
-      </button>
+      <div className="relative flex-1 min-h-0"
+        onMouseMove={e => { const r = e.currentTarget.getBoundingClientRect(); setShowLeftArrow(e.clientX - r.left < 80); setShowRightArrow(r.right - e.clientX < 80); }}>
+      {/* Colunas escondidas: a borda do quadro escurece daquele lado e, com o
+          mouse perto, aparece um botão redondo para andar pelas colunas. */}
+      {activeView === 'board' && rolagem.esq && (
+        <div className="hidden md:flex absolute top-0 bottom-0 left-0 w-16 z-[100] items-center justify-start pl-3 pointer-events-none bg-gradient-to-r from-slate-950/80 to-transparent">
+          <button onClick={rolarEsquerda} title="Ver colunas à esquerda" className={`${SETA_QUADRO} ${showLeftArrow ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`}>
+            <ChevronLeft size={22} />
+          </button>
+        </div>
+      )}
+      {activeView === 'board' && rolagem.dir && (
+        <div className="hidden md:flex absolute top-0 bottom-0 right-0 w-16 z-[100] items-center justify-end pr-3 pointer-events-none bg-gradient-to-l from-slate-950/80 to-transparent">
+          <button onClick={rolarDireita} title="Ver colunas à direita" className={`${SETA_QUADRO} ${showRightArrow ? 'opacity-100 pointer-events-auto' : 'opacity-0'}`}>
+            <ChevronRight size={22} />
+          </button>
+        </div>
+      )}
 
       {/* Non-board views */}
+      {activeView === 'config' && (
+        <div className="absolute inset-0">
+          <AdminPanel user={user} currentUsers={allUsers} refreshUsers={fetchUsers} />
+        </div>
+      )}
       {activeView === 'cronograma' && (
-        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
-          <CronogramaView cards={cards} allUsers={allUsers} setModal={setModal} />
+        <div className="absolute inset-0">
+          <CronogramaView cards={cards} allUsers={allUsers} setModal={setModal} onCronometroChange={setCronometro} />
         </div>
       )}
       {activeView === 'notas' && (
-        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+        <div className="absolute inset-0">
           <NotasView user={user} allUsers={allUsers} cards={cardsArray}
             openItemId={pendingOpenItem?.type === 'nota' ? pendingOpenItem.id : null}
             onOpenItemHandled={() => setPendingOpenItem(null)} />
         </div>
       )}
+      {activeView === 'relatorios' && (
+        <div className="absolute inset-0">
+          <RelatoriosView user={user} onAbrirCard={onNavigateToCard}
+            abrir={relatorioDoLink} onAbrirUsado={() => setRelatorioDoLink(null)}
+            onLido={() => { syncBlockedUntil.current = 0; sync(); }} />
+        </div>
+      )}
       {activeView === 'desenho' && (
-        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+        <div className="absolute inset-0">
           <DesenhoView user={user} allUsers={allUsers} cards={cardsArray}
             openItemId={pendingOpenItem?.type === 'desenho' ? pendingOpenItem.id : null}
             onOpenItemHandled={() => setPendingOpenItem(null)} />
         </div>
       )}
       {activeView === 'dashboard' && (
-        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+        <div className="absolute inset-0">
           <DashboardView cardsById={cards} setModal={setModal} />
         </div>
       )}
       {activeView === 'gestao' && hasPermission(user, 'acessar_gestao') && (
-        <div className="absolute inset-0 transition-[top] duration-300" style={{ top: headerPinned ? headerHeight : 0 }}>
+        <div className="absolute inset-0">
           <GestaoView onAbrirCard={onNavigateToCard} allUsers={allUsers} />
         </div>
       )}
@@ -653,8 +687,7 @@ export default function App() {
       {/* Board view */}
       <div
         ref={boardRef}
-        className={`h-full overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden p-3 md:p-8 custom-scrollbar transition-[padding-top] duration-300 ${activeView !== 'board' ? 'invisible pointer-events-none absolute' : ''}`}
-        style={{ paddingTop: headerPinned ? headerHeight + 12 : undefined }}
+        className={`h-full overflow-y-auto overflow-x-hidden md:overflow-x-auto md:overflow-y-hidden p-3 md:p-6 custom-scrollbar ${activeView !== 'board' ? 'invisible pointer-events-none absolute' : ''}`}
       >
         <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
           <div className="relative min-h-full md:h-full w-full md:w-max md:min-w-full">
@@ -854,6 +887,8 @@ export default function App() {
             )}
           </div>
         </DragDropContext>
+      </div>
+      </div>
       </div>
     </div>
   );

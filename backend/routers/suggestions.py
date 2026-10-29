@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from audit import SIMPLE_CARD_FIELDS_MAP, _mk_log
 from database import get_db
 from lixeira import excluir_linha
+import notificacoes
 from models import CardDB, CardSeenDB, SuggestionDB, UserDB
 from rbac import get_visible_column_ids, require_permission
 from schemas import SuggestionCreate, SuggestionDecision
@@ -118,6 +119,7 @@ def create_suggestion(card_id: str, body: SuggestionCreate, db: Session = Depend
             reversao={"sug_id": nova.id})
     db.commit()
     db.refresh(nova)
+    notificacoes.sugestao_nova(db, db_card, current_user, nova)
     return _serialize(nova)
 
 
@@ -264,6 +266,7 @@ def decide_suggestion(card_id: str, suggestion_id: str, body: SuggestionDecision
                       "aplicou": aplicou, "reverteu": reverteu,
                       "valor_anterior": decisao_antes["valor_anterior"] if reverteu else sugestao.valor_anterior})
     db.commit()
+    notificacoes.sugestao_decidida(db, db_card, current_user, sugestao)
     return {"ok": True}
 
 

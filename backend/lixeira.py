@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from attachment_storage import caminho_do_anexo
 from models import (
-    AttachmentDB, CardDB, CardSeenDB, ColumnDB, DrawingDB, ItemSeenDB, LixeiraDB,
+    AttachmentDB, CardDB, CardSeenDB, CardSeguidorDB, ColumnDB, DrawingDB, ItemSeenDB, LixeiraDB,
     RoleDB, SuggestionDB, TimeEntryDB, UserDB, UserNoteDB, UserRoleDB,
 )
 
@@ -228,6 +228,7 @@ def purgar_lixeira(db):
             db.query(SuggestionDB).filter(SuggestionDB.card_id == item.alvo_id).delete(synchronize_session=False)
             db.query(UserNoteDB).filter(UserNoteDB.card_id == item.alvo_id).update({UserNoteDB.card_id: None}, synchronize_session=False)
             db.query(DrawingDB).filter(DrawingDB.card_id == item.alvo_id).update({DrawingDB.card_id: None}, synchronize_session=False)
+            db.query(CardSeguidorDB).filter(CardSeguidorDB.card_id == item.alvo_id).delete(synchronize_session=False)
         db.delete(item)
     db.commit()
     return len(vencidos)

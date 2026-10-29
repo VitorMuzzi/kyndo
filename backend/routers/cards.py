@@ -7,12 +7,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import CardDB, CardSeenDB, ColumnDB, ItemSeenDB, SuggestionDB, UserDB
+from models import CardDB, CardSeenDB, CardSeguidorDB, ColumnDB, ItemSeenDB, SuggestionDB, UserDB
 from schemas import CardMergeRequest, CardReorderItem, CardSchema
 from security import get_current_user, require_admin
 from audit import _mk_log, carimbar_autoria_checklist, log_card_created, log_card_deleted, process_card_update
 from card_merge import CONFIRMACAO, confirmacao_valida, fundir_cards
 from lixeira import excluir_card
+import notificacoes
 from rbac import filter_checklist_for_permission, get_user_permissions, get_visible_column_ids, require_permission
 
 router = APIRouter()
@@ -214,8 +215,9 @@ def get_cards(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
             .all()
         )
 
+    sigo = {s.card_id for s in db.query(CardSeguidorDB).filter(CardSeguidorDB.user_id == current_user.id).all()}
     return [
-        _serialize_card(c, seen_map.get(c.id), item_seen_map.get(c.id, {}), pendentes.get(c.id, 0))
+        {**_serialize_card(c, seen_map.get(c.id), item_seen_map.get(c.id, {}), pendentes.get(c.id, 0)), "seguindo": c.id in sigo}
         for c in all_cards
     ]
 
@@ -268,6 +270,7 @@ def create_card(card: CardSchema, db: Session = Depends(get_db), current_user: U
     db.add(CardSeenDB(card_id=novo.id, user_id=current_user.id, visto_em=now_iso, visto_versao=0))
     db.commit()
     db.refresh(novo)
+    notificacoes.card_criado(db, novo, current_user)
     return novo
 
 
@@ -286,6 +289,8 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
     db_card = db.query(CardDB).filter(CardDB.id == card_id).first()
     if db_card:
         _assert_card_visible(db, current_user, db_card)
+        # Pros avisos por e-mail depois do commit: o que mudou neste salvamento.
+        foto_antes = notificacoes.foto_card(db_card)
         # Revert any field the caller isn't allowed to change BEFORE the diff/log
         # runs, so an unauthorized (or just stale, from a concurrent edit) change
         # never gets logged or persisted — no 403 here, see rbac plan notes.
@@ -349,7 +354,25 @@ def update_card(card_id: str, card: CardSchema, db: Session = Depends(get_db), c
             else:
                 db.add(ItemSeenDB(card_id=card_id, item_id=item["id"], user_id=current_user.id, visto_versao=versao))
         db.commit()
+        notificacoes.card_salvo(db, db_card, current_user, foto_antes)
     return {"msg": "atualizado"}
+
+
+@router.put("/cards/{card_id}/seguir")
+def seguir_card(card_id: str, body: dict, db: Session = Depends(get_db), current_user: UserDB = Depends(get_current_user)):
+    """{"seguir": true|false} — seguir faz o card entrar no alcance "Meus e
+    os que sigo" dos avisos por e-mail."""
+    db_card = db.query(CardDB).filter(CardDB.id == card_id).first()
+    if not db_card:
+        raise HTTPException(status_code=404, detail="Card não encontrado")
+    _assert_card_visible(db, current_user, db_card)
+    atual = db.query(CardSeguidorDB).filter(CardSeguidorDB.card_id == card_id, CardSeguidorDB.user_id == current_user.id).first()
+    if body.get("seguir") and not atual:
+        db.add(CardSeguidorDB(card_id=card_id, user_id=current_user.id))
+    elif not body.get("seguir") and atual:
+        db.delete(atual)
+    db.commit()
+    return {"seguindo": bool(body.get("seguir"))}
 
 
 @router.delete("/cards/{card_id}")

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, ArrowLeft, AlignLeft, CheckSquare, Circle, CheckCircle2, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge, ListTree, Minus, Plus, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, AlignLeft, CheckSquare, Circle, CheckCircle2, MessageSquare, Send, Calendar, ChevronDown, ChevronRight, MoreHorizontal, FileText, PenLine, ExternalLink, Network, Repeat, Merge, ListTree, Minus, Plus, Eye, EyeOff, Trash2, Bell, BellOff } from 'lucide-react';
 import { PRIORIDADES_BADGE, userColor, formatarData, hasPermission, autorRoleChips, renderTextWithLinks, GitHubIcon } from '../constants.jsx';
 import { API, authFetch } from '../api.js';
 import DrawingThumbnail from './DrawingThumbnail.jsx';
@@ -48,6 +48,13 @@ export default function CardPage({ card, col, allColumns, user, allUsers, allCar
   const [prioridade, setPrioridade] = useState(card?.prioridade || 'Normal');
   const [comentarios, setComentarios] = useState(card?.comentarios || []);
   const [prazo, setPrazo] = useState(card?.prazo || '');
+  // Seguir vale na hora (não espera o "Salvar Tudo"): só decide quais avisos
+  // por e-mail a pessoa recebe deste card.
+  const [seguindo, setSeguindo] = useState(!!card?.seguindo);
+  const alternarSeguir = async () => {
+    const res = await authFetch(`${API}/cards/${card.id}/seguir`, { method: 'PUT', body: JSON.stringify({ seguir: !seguindo }) });
+    if (res.ok) setSeguindo((await res.json()).seguindo);
+  };
   const [responsaveis, setResponsaveis] = useState(
     card?.responsaveis?.length > 0 ? card.responsaveis : (card?.autor ? [card.autor] : [user.nome])
   );
@@ -277,6 +284,14 @@ export default function CardPage({ card, col, allColumns, user, allUsers, allCar
           </span>
         )}
         <div className="flex-1"/>
+        {card?.id && (
+          <button onClick={alternarSeguir}
+            title={seguindo ? 'Você segue este card — clique para deixar de seguir' : 'Seguir: receber por e-mail os avisos deste card que você escolheu em "Meus e os que sigo"'}
+            className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-bold transition-colors ${seguindo ? 'text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>
+            {seguindo ? <Bell size={14}/> : <BellOff size={14}/>}
+            <span className="hidden sm:inline">{seguindo ? 'Seguindo' : 'Seguir'}</span>
+          </button>
+        )}
         {temAlteracoes && <span className="hidden sm:inline text-[11px] font-bold text-amber-300/80">Alterações não salvas</span>}
         <button onClick={salvar} disabled={salvando} className="px-4 md:px-6 py-2 bg-emerald-600 text-white rounded-lg font-bold text-xs md:text-sm shadow-lg hover:bg-emerald-700 disabled:opacity-60 transition-colors">{salvando ? 'Salvando...' : 'Salvar Tudo'}</button>
       </div>

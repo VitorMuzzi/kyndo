@@ -26,6 +26,7 @@ PERMISSIONS = {
     "ver_tempo_equipe": "Ver os registros de tempo (horários) de cada pessoa nos cards",
     "acessar_gestao": "Acessar a tela de Gestão (horas e andamento da equipe)",
     "restaurar_alteracoes": "Recuperar itens excluídos e desfazer alterações (pelo log de auditoria)",
+    "configurar_emails": "Configurar os e-mails automáticos (quais são obrigatórios, opcionais ou desligados)",
 }
 
 

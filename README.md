@@ -4,9 +4,9 @@ criei esse aplicativo com o intuito de gerir e facilitar as solicitações de ta
 
 A arquitetura é dividida em um frontend construído em React e uma API REST desenvolvida em Python utilizando FastAPI. O sistema inclui suporte a compilação nativa para Android através do Capacitor.
 
-O quadro funciona no estilo kanban, com colunas configuráveis e arrastar-e-soltar, mas a ideia foi crescendo e hoje ele tem bem mais coisa do que só o quadro: notas, mapas mentais, desenhos, dashboard, log de auditoria e um sistema de cargos com permissões separadas uma a uma.
+O quadro funciona no estilo kanban, com colunas configuráveis e arrastar-e-soltar, mas a ideia foi crescendo e hoje ele tem bem mais coisa do que só o quadro: cronômetro de trabalho, relatórios diários, notas, mapas mentais, desenhos, dashboard, tela de gestão, avisos por e-mail, log de auditoria e um sistema de cargos com permissões separadas uma a uma.
 
-A interface é escura por padrão, e a versão atual é a v1.7.1 (mostrada no canto da tela).
+A interface é escura por padrão, com um menu lateral (recolhível só nos ícones; no celular vira uma gaveta) para trocar de tela. A versão atual é a v2.0.0-beta.1 (mostrada no canto da tela).
 
 ---
 
@@ -56,9 +56,27 @@ Aba de notas com editor de texto e editor de canvas pra mapas mentais (blocos li
 
 Qualquer nota ou desenho pode ser vinculada a um cartão, deixada pública ou compartilhada com pessoas específicas, com nível de ver ou editar.
 
-**Cronograma e Dashboard**
+**Cronômetro e tempo**
 
-Cronograma mostra os cartões na linha do tempo pelos prazos.
+Cada pessoa liga o cronômetro num cartão (ou numa etapa dele) e o tempo corre no servidor — fechar a aba não perde nada, e só um cronômetro roda por vez. No cartão, o tempo aparece somado por tarefa, com o histórico de cada período (início e fim) e a opção de mover um registro para outra etapa depois. Cronômetro ligado 12 horas seguidas gera um aviso por e-mail ("foi esquecido?").
+
+**Cronograma e atividades fora de cartão**
+
+Cronograma mostra os cartões na linha do tempo pelos prazos, uma linha por responsável.
+
+Também registra atividades que não são de nenhum cartão — saída de campo, reunião, treinamento: dá pra começar o cronômetro nela, lançar depois um período já feito ou agendar para o futuro. Elas aparecem numa faixa roxa na linha da pessoa (tracejada enquanto só agendada) e o tempo soma na Gestão e nos Relatórios. Só quem criou mexe na atividade.
+
+**Relatórios**
+
+Cada pessoa escreve o relatório de cada dia (salva sozinho) com, ao lado, o que fez naquele dia: tempo por cartão, etapa e atividade, mais as ações registradas (etapas concluídas, cartões criados, mudanças de coluna, comentários). Um botão cola esse resumo no texto.
+
+Modelos de relatório guardam um texto pronto com campos que se preenchem sozinhos (`{data}`, `{dia_da_semana}`, `{nome}`, `{tempo_total}`, `{resumo}`).
+
+O relatório vai para um ou mais gestores (quem acessa a Gestão): na hora, agendado para uma data e hora, ou automaticamente nos dias e horário escolhidos (com a opção de mandar o resumo gerado quando nada foi escrito). O gestor recebe na aba Recebidos e, se tiver e-mail, também por e-mail; cada relatório tem uma conversa entre quem escreveu e o gestor, com aviso de lido e de resposta nova.
+
+**Gestão**
+
+Para quem tem a permissão: horas da equipe no período, quem está trabalhando agora, andamento dos cartões e a ficha de cada pessoa (horas por dia, por cartão e atividade, registros e cartões sob responsabilidade).
 
 Dashboard traz total de cartões, distribuição por coluna e por prioridade, atrasados, carga por responsável, tempo médio de conclusão e um resumo das sugestões por status e por quem decidiu.
 
@@ -67,6 +85,18 @@ Dashboard traz total de cartões, distribuição por coluna e por prioridade, at
 Cada cartão pode apontar pra um repositório, e o cartão mostra informação do pull request vinculado. Precisa de um `GITHUB_TOKEN` no `.env`.
 
 Não mostra status de CI de propósito: a Checks API do GitHub (que é onde o Actions reporta) só é legível por GitHub App, nunca por token pessoal.
+
+**E-mail**
+
+Com uma conta de e-mail configurada no `.env` (Gmail/Google Workspace ou qualquer SMTP), o Kyndo manda:
+
+- o link de "Esqueci a senha" (vale 1 hora, uma vez só) — sem e-mail cadastrado, o pedido vai pro administrador;
+- avisos de segurança: senha ou e-mail da conta alterados (sempre enviados);
+- avisos de cartão: virou responsável, comentário, prioridade, prazo, coluna, cartão concluído, etapa concluída, anexo e cartão novo;
+- avisos de sugestão (esperando decisão, aceita ou recusada), de relatório (recebido, resposta na conversa) e de cronômetro esquecido;
+- resumos: prazos vencendo (8h), cartões parados há 3 dias sem nenhuma alteração (8h) e resumo semanal da equipe (segunda, 8h, para quem acessa a Gestão).
+
+Para cada aviso a pessoa escolhe o alcance — não receber, só os cartões dela, os dela e os que segue (botão Seguir no cartão) ou todos que enxerga — e se recebe na hora ou num resumo do dia às 18h. Quem tem a permissão de configurar e-mails define cada aviso como opcional, obrigatório (garante no mínimo os cartões da pessoa) ou desligado, na aba E-mails, que também tem um botão de e-mail de teste.
 
 **Log de auditoria**
 
@@ -131,6 +161,17 @@ GITHUB_TOKEN=opcional_so_pra_integracao_com_github
 ```
 
 O `SECRET_KEY` é o que assina os tokens de login. Sem ele o sistema sobe com uma chave padrão que está no código — serve pra rodar local, mas não use assim em rede.
+
+Pra ligar o envio de e-mail, acrescente no mesmo `.env`:
+
+```
+SMTP_USER=kyndo@suaempresa.com.br
+SMTP_PASSWORD=senha_de_app_de_16_letras
+KYNDO_URL=http://ip-ou-endereco-do-kyndo:5176
+# opcionais: SMTP_HOST (padrão smtp.gmail.com), SMTP_PORT (587), SMTP_FROM, SMTP_FROM_NAME (Kyndo)
+```
+
+No Gmail/Google Workspace, `SMTP_PASSWORD` é uma **senha de app** (Conta Google → Segurança → Verificação em duas etapas ligada → Senhas de app), não a senha normal da conta. `KYNDO_URL` é o endereço que abre o Kyndo — é pra onde apontam os links dos e-mails. Sem `SMTP_USER`/`SMTP_PASSWORD` nada é enviado e o sistema funciona como antes.
 
 Inicie o servidor:
 

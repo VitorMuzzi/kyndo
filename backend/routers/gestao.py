@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import CardDB, ColumnDB, TimeEntryDB, UserDB
+from models import AtividadeDB, CardDB, ColumnDB, TimeEntryDB, UserDB
 from rbac import get_visible_column_ids, require_permission
 from routers.tempo import _etapas_por_id
 
@@ -99,12 +99,35 @@ def _entradas_no_periodo(db, card_ids, ini, fim):
     ).all()
 
 
+def _entradas_de_atividades(db, ini, fim):
+    """Tempo das atividades fora de card (saída de campo...) no período —
+    entram nas horas de cada pessoa, sem depender das colunas visíveis."""
+    return db.query(TimeEntryDB).filter(
+        TimeEntryDB.atividade_id != None,  # noqa: E711
+        TimeEntryDB.inicio < fim.isoformat(),
+        (TimeEntryDB.fim == None) | (TimeEntryDB.fim > ini.isoformat()),  # noqa: E711
+    ).all()
+
+
+def _titulos_atividades(db):
+    return {a.id: a.titulo for a in db.query(AtividadeDB).all()}
+
+
 def _em_andamento(db, cards_por_id, agora, user_id=None):
     q = db.query(TimeEntryDB).filter(TimeEntryDB.fim == None)  # noqa: E711
     if user_id:
         q = q.filter(TimeEntryDB.user_id == user_id)
     rodando = []
+    atividades = None
     for e in q.all():
+        if e.atividade_id:
+            atividades = atividades if atividades is not None else _titulos_atividades(db)
+            rodando.append({
+                "user_id": e.user_id, "usuario": e.usuario, "card_id": None, "atividade_id": e.atividade_id,
+                "card_titulo": atividades.get(e.atividade_id, "Atividade"), "etapa_texto": None, "inicio": e.inicio,
+                "decorrido_segundos": max(0, int((agora - datetime.fromisoformat(e.inicio)).total_seconds())),
+            })
+            continue
         card = cards_por_id.get(e.card_id)
         if not card:
             continue
@@ -136,6 +159,8 @@ def visao_geral(inicio: Optional[str] = None, fim: Optional[str] = None, db: Ses
         seg_card[e.card_id] += seg
         seg_user[e.user_id] += seg
         cards_user[e.user_id].add(e.card_id)
+    for e in _entradas_de_atividades(db, ini, fim_dt):
+        seg_user[e.user_id] += _sobreposicao(e, ini, fim_dt, agora)
 
     # Tempo total de cada card, desde sempre — o andamento compara o período com o acumulado.
     seg_total_card = defaultdict(int)
@@ -186,7 +211,10 @@ def ficha_funcionario(user_id: str, inicio: Optional[str] = None, fim: Optional[
     cards_por_id = {c.id: c for c in cards}
 
     entradas = [e for e in _entradas_no_periodo(db, list(cards_por_id), ini, fim_dt) if e.user_id == alvo.id]
+    entradas += [e for e in _entradas_de_atividades(db, ini, fim_dt) if e.user_id == alvo.id]
     entradas.sort(key=lambda e: e.inicio, reverse=True)
+    titulos_atv = _titulos_atividades(db)
+    por_atividade = defaultdict(int)
 
     por_dia = defaultdict(int)
     por_card = defaultdict(int)
@@ -195,7 +223,10 @@ def ficha_funcionario(user_id: str, inicio: Optional[str] = None, fim: Optional[
         seg = _sobreposicao(e, ini, fim_dt, agora)
         if not seg:
             continue
-        por_card[e.card_id] += seg
+        if e.atividade_id:
+            por_atividade[e.atividade_id] += seg
+        else:
+            por_card[e.card_id] += seg
         # Reparte entre os dias que o intervalo atravessa.
         dia = max(datetime.fromisoformat(e.inicio).date(), d_ini)
         ultimo = min((datetime.fromisoformat(e.fim) if e.fim else agora).date(), d_fim)
@@ -203,6 +234,13 @@ def ficha_funcionario(user_id: str, inicio: Optional[str] = None, fim: Optional[
             d0 = datetime.combine(dia, datetime.min.time())
             por_dia[dia.isoformat()] += _sobreposicao(e, d0, d0 + timedelta(days=1), agora)
             dia += timedelta(days=1)
+        if e.atividade_id:
+            registros.append({
+                "id": e.id, "card_id": None, "atividade_id": e.atividade_id,
+                "card_titulo": titulos_atv.get(e.atividade_id, "Atividade"), "etapa_texto": None,
+                "inicio": e.inicio, "fim": e.fim, "segundos": seg,
+            })
+            continue
         card = cards_por_id[e.card_id]
         etapa = _etapas_por_id(card.checklist).get(e.item_id) if e.item_id else None
         registros.append({
@@ -232,11 +270,15 @@ def ficha_funcionario(user_id: str, inicio: Optional[str] = None, fim: Optional[
     return {
         "usuario": {"id": alvo.id, "nome": alvo.nome},
         "periodo": {"inicio": d_ini.isoformat(), "fim": d_fim.isoformat()},
-        "total_segundos": sum(por_card.values()),
+        "total_segundos": sum(por_card.values()) + sum(por_atividade.values()),
         "por_dia": dias,
         "por_card": sorted(
             ({"card_id": cid, "titulo": cards_por_id[cid].titulo, "segundos": s} for cid, s in por_card.items()),
             key=lambda c: -c["segundos"],
+        ),
+        "por_atividade": sorted(
+            ({"atividade_id": aid, "titulo": titulos_atv.get(aid, "Atividade"), "segundos": s} for aid, s in por_atividade.items()),
+            key=lambda a: -a["segundos"],
         ),
         "registros": registros,
         "cards_responsavel": responsavel,

@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from audit import _mk_log
 from database import get_db
 from lixeira import excluir_usuario
-from models import PedidoSenhaDB, RoleDB, UserDB, UserRoleDB
+import notificacoes
+from models import PedidoSenhaDB, RoleDB, TokenSenhaDB, UserDB, UserRoleDB
 from rbac import get_user_permissions, is_superadmin, require_permission
 from renomear import renomear_usuario, validar_nome
 from schemas import PasswordUpdate, UserCreate, UserRename
@@ -23,6 +24,8 @@ def get_users(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
     for ur in db.query(UserRoleDB).all():
         roles_by_user.setdefault(ur.user_id, []).append(ur.role_id)
 
+    # E-mail é dado pessoal: só aparece pra quem administra usuários.
+    ve_email = bool({"gerenciar_usuarios", "trocar_senha_outros"} & get_user_permissions(db, current_user.id))
     result = []
     for u in db.query(UserDB).all():
         roles = [
@@ -32,6 +35,7 @@ def get_users(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
         result.append({
             "id": u.id, "nome": u.nome, "role": u.role,
             "senha_temporaria": u.senha_temporaria, "roles": roles,
+            **({"email": u.email} if ve_email else {}),
         })
     return result
 
@@ -40,8 +44,10 @@ def get_users(db: Session = Depends(get_db), current_user: UserDB = Depends(get_
 def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: UserDB = Depends(require_permission("gerenciar_usuarios"))):
     if db.query(UserDB).filter(UserDB.nome == req.nome).first():
         raise HTTPException(status_code=400, detail="Usuário já existe")
+    from routers.emails import validar_email
+    email = validar_email(db, req.email)
     hashed_pw = get_password_hash(req.senha)
-    novo = UserDB(id=str(uuid.uuid4()), nome=req.nome, senha=hashed_pw, role="user", senha_temporaria=True)
+    novo = UserDB(id=str(uuid.uuid4()), nome=req.nome, senha=hashed_pw, role="user", senha_temporaria=True, email=email)
     db.add(novo)
     # Every new user starts with just the baseline "Usuário" cargo — additional
     # cargos are granted afterward through the Cargos screen, not at creation time.
@@ -97,10 +103,12 @@ def update_password(user_id: str, req: PasswordUpdate, db: Session = Depends(get
     # Senha definida por outra pessoa é conhecida por ela — o dono troca no próximo login.
     user.senha_temporaria = not propria
     db.query(PedidoSenhaDB).filter(PedidoSenhaDB.user_id == user.id).delete()
+    db.query(TokenSenhaDB).filter(TokenSenhaDB.user_id == user.id).delete()
     if not propria:
         _mk_log(db, None, user.nome, current_user.nome, "senha_redefinida", alvo_tipo="usuario", alvo_id=user.id,
                 detalhe="senha temporária definida por outra pessoa")
     db.commit()
+    notificacoes.avisar_senha_alterada(user, por_outra_pessoa=not propria)
     resposta = {"msg": "senha atualizada"}
     if propria:
         # A troca invalidou o token desta sessão também; devolve um novo pra
