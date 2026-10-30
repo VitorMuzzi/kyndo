@@ -33,7 +33,9 @@ const listarEtapas = (checklist) => {
   return lista;
 };
 
-export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarEtapas, cronometro, onCronometroChange }) {
+// `checklist` é o da tela, com o que ainda não foi salvo: dá pra ligar o
+// cronômetro numa etapa recém-criada sem antes clicar em "Salvar Tudo".
+export default function TempoSection({ cardId, usuario, checklist, mostrarEtapas, cronometro, onCronometroChange }) {
   const [dados, setDados] = useState(null);
   const [etapaEscolhida, setEtapaEscolhida] = useState('');
   const [erro, setErro] = useState('');
@@ -42,8 +44,10 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
   const rodandoAqui = cronometro?.card_id === cardId;
   const decorrido = useDecorrido(rodandoAqui ? cronometro : null);
   const agora = useAgora(rodandoAqui);
-  const etapas = listarEtapas(checklistSalvo);
+  const etapas = listarEtapas(checklist);
   const usaEtapas = mostrarEtapas && etapas.length > 0;
+  // A etapa escolhida pode ter sido apagada da tela depois.
+  const etapaValida = etapas.some(e => e.id === etapaEscolhida) ? etapaEscolhida : '';
 
   const carregar = () => {
     authFetch(`${API}/cards/${cardId}/tempo`)
@@ -57,7 +61,7 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
   const iniciar = async () => {
     setErro('');
     try {
-      onCronometroChange(await iniciarCronometro(cardId, etapaEscolhida));
+      onCronometroChange(await iniciarCronometro(cardId, etapaValida));
     } catch (e) {
       setErro(e.message);
     }
@@ -135,6 +139,8 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
     .filter(r => tarefa.id === TUDO || (r.item_id || SEM_ETAPA) === tarefa.id)
     .sort((a, b) => a.inicio.localeCompare(b.inicio));
   const tarefaRodando = rodandoAqui ? (usaEtapas ? (cronometro.item_id || SEM_ETAPA) : TUDO) : null;
+  // Etapa ainda não salva: o servidor só sabe o nome dela depois do "Salvar Tudo".
+  const etapaRodando = rodandoAqui && (etapas.find(e => e.id === cronometro.item_id)?.texto || cronometro.etapa_texto);
 
   return (
     <div className="space-y-3">
@@ -157,7 +163,7 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
           </span>
           <div className="flex-1 min-w-0">
             <div className="font-mono text-lg font-bold text-emerald-300 tabular-nums">{formatarRelogio(decorrido)}</div>
-            {mostrarEtapas && cronometro.etapa_texto && <div className="text-[11px] text-slate-400 truncate">em {cronometro.etapa_texto}</div>}
+            {mostrarEtapas && etapaRodando && <div className="text-[11px] text-slate-400 truncate">em {etapaRodando}</div>}
           </div>
           <button onClick={parar} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-500/15 text-red-300 hover:bg-red-500/30 text-xs font-bold transition-colors">
             <Square size={12} fill="currentColor"/> Parar
@@ -167,7 +173,7 @@ export default function TempoSection({ cardId, usuario, checklistSalvo, mostrarE
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
             {usaEtapas && (
-              <select value={etapaEscolhida} onChange={e => setEtapaEscolhida(e.target.value)}
+              <select value={etapaValida} onChange={e => setEtapaEscolhida(e.target.value)}
                 className="flex-1 min-w-[160px] text-xs bg-slate-900 text-slate-100 border border-slate-700 rounded-lg px-2 py-2 outline-none focus:border-emerald-400">
                 <option value="">Card inteiro (sem etapa)</option>
                 {etapas.map(e => (

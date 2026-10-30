@@ -1,7 +1,7 @@
 import React from 'react';
 import { SquareKanban, ChartGantt, StickyNote, ClipboardList, PenTool, ChartColumn, Briefcase, Settings } from 'lucide-react';
 
-export const APP_VERSION = 'v2.0.0-beta.1';
+export const APP_VERSION = 'v2.0.0-beta.2';
 
 export const USER_COLORS = [
   'bg-blue-500/15 text-blue-300',

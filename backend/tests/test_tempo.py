@@ -88,10 +88,18 @@ def test_timer_on_a_step_counts_per_step(client, admin_token):
     assert _tempo(client, pessoa["token"], card["id"])["por_etapa"]["s-1"] >= 60
 
 
-def test_timer_rejects_unknown_step(client, admin_token):
+def test_timer_accepts_step_not_saved_yet(client, admin_token):
+    # A etapa acabou de ser criada na tela e só chega no "Salvar Tudo".
+    pessoa = create_user(client, admin_token, "crono_etapa_nova")
     card = _create_card(client, admin_token, "admin")
-    r = _iniciar(client, admin_token, card["id"], item_id="nao-existe")
-    assert r.status_code == 400
+    atual = _iniciar(client, pessoa["token"], card["id"], item_id="nova-1").json()
+    assert atual["item_id"] == "nova-1"
+    assert atual["etapa_texto"] is None
+
+    payload = {"titulo": card["titulo"], "status": card["status"], "autor": card["autor"],
+               "checklist": [{"id": "nova-1", "texto": "Etapa nova", "concluido": False}]}
+    assert client.put(f"/cards/{card['id']}", json=payload, headers=auth(admin_token)).status_code == 200
+    assert _atual(client, pessoa["token"])["etapa_texto"] == "Etapa nova"
 
 
 def test_everyone_sees_time_per_person_but_entries_need_permission(client, admin_token):
@@ -153,7 +161,6 @@ def test_finished_entry_can_be_linked_to_a_step_later(client, admin_token):
 
     url = f"/tempo/{entry_id}"
     assert client.put(url, json={"item_id": "v-1a"}, headers=auth(outro["token"])).status_code == 403
-    assert client.put(url, json={"item_id": "nao-existe"}, headers=auth(dono["token"])).status_code == 400
     assert client.put(url, json={"item_id": "v-1a"}, headers=auth(dono["token"])).status_code == 200
     tempo = _tempo(client, dono["token"], card["id"])
     assert tempo["por_etapa"]["v-1a"] >= 120

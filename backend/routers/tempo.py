@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from audit import _mk_log
@@ -26,7 +26,10 @@ router = APIRouter()
 
 
 class IniciarTempo(BaseModel):
-    item_id: Optional[str] = None
+    # Não precisa existir no card salvo: a etapa pode ter acabado de ser criada
+    # na tela e só chegar ao servidor no "Salvar Tudo". Se nunca chegar, o
+    # tempo aparece como "Etapa removida" e pode ser movido.
+    item_id: Optional[str] = Field(None, max_length=100)
 
 
 def _assert_card_visible(db, current_user, db_card):
@@ -95,8 +98,6 @@ def iniciar_cronometro(card_id: str, body: IniciarTempo, db: Session = Depends(g
     if not db_card:
         raise HTTPException(status_code=404, detail="Card não encontrado")
     _assert_card_visible(db, current_user, db_card)
-    if body.item_id and body.item_id not in _etapas_por_id(db_card.checklist):
-        raise HTTPException(status_code=400, detail="Etapa não encontrada neste card")
 
     agora = datetime.now()
     anterior = _em_andamento(db, current_user.id)
@@ -181,8 +182,6 @@ def vincular_etapa(entry_id: str, body: IniciarTempo, db: Session = Depends(get_
     if not card:
         raise HTTPException(status_code=404, detail="Card não encontrado")
     _assert_card_visible(db, current_user, card)
-    if body.item_id and body.item_id not in _etapas_por_id(card.checklist):
-        raise HTTPException(status_code=400, detail="Etapa não encontrada neste card")
     entry.item_id = body.item_id or None
     db.commit()
     return {"ok": True, "item_id": entry.item_id}

@@ -470,9 +470,7 @@ export default function CardPage({ card, col, allColumns, user, allUsers, allCar
                 <TempoSection
                   cardId={card.id}
                   usuario={user.nome}
-                  // A etapa escolhida precisa existir no servidor — etapa recém-criada
-                  // e ainda não salva não aparece até o "Salvar Tudo".
-                  checklistSalvo={card.checklist}
+                  checklist={checklist}
                   mostrarEtapas={mostrarEtapas}
                   cronometro={cronometro}
                   onCronometroChange={onCronometroChange}
